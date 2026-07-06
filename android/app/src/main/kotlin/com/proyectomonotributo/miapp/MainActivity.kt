@@ -1,4 +1,4 @@
-package com.example.argestion_app
+package com.proyectomonotributo.miapp
 
 import io.flutter.embedding.android.FlutterActivity
 
