@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "621798469036",
+    "project_id": "proyectomonotributo",
+    "storage_bucket": "proyectomonotributo.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:621798469036:android:aa28897aa45a66d3d1de09",
+        "android_client_info": {
+          "package_name": "com.example.argestion_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFbEmRiYHdlAwzuMhiwe0-wHkXqA4ApQU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:621798469036:android:0a63ed1b63dd5461d1de09",
+        "android_client_info": {
+          "package_name": "com.proyectomonotributo.miapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFbEmRiYHdlAwzuMhiwe0-wHkXqA4ApQU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
