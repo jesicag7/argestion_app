@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart'; 
 import 'package:cloud_firestore/cloud_firestore.dart'; 
 import 'models/usuario_model.dart'; 
+import 'main_navigation.dart'; 
 
 class RegistroScreen extends StatefulWidget {
   const RegistroScreen({super.key});
@@ -36,60 +37,76 @@ class _RegistroScreenState extends State<RegistroScreen> {
     super.dispose();
   }
 
+  void _mostrarError(String mensaje) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensaje, style: const TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFFEF4444),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Future<void> _registrarUsuario() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
+    if (!_formKey.currentState!.validate()) {
+      _mostrarError('Revisá los campos resaltados. Completá todos los datos, '
+          'asegurate de que las contraseñas coincidan y usá al menos 6 caracteres '
+          'combinando letras y números.');
+      return;
+    }
 
-      try {
-        UserCredential userCredential = await FirebaseAuth.instance
-            .createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
+    setState(() => _isLoading = true);
 
-        String uidUser = userCredential.user!.uid;
+    try {
+      UserCredential userCredential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
 
-        UsuarioModel nuevoUsuario = UsuarioModel(
-          uid: uidUser,
-          nombre: _nombreController.text.trim(),
-          cuit: _cuitController.text.trim(),
-          categoria: _categoriaSeleccionada,
-          email: _emailController.text.trim(),
-        );
+      String uidUser = userCredential.user!.uid;
 
-        await FirebaseFirestore.instance
-            .collection('usuarios')
-            .doc(uidUser)
-            .set(nuevoUsuario.toMap());
+      UsuarioModel nuevoUsuario = UsuarioModel(
+        uid: uidUser,
+        nombre: _nombreController.text.trim(),
+        cuit: _cuitController.text.trim(),
+        categoria: _categoriaSeleccionada,
+        email: _emailController.text.trim(),
+      );
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✔️ ¡Usuario registrado con éxito en el sistema!'),
-              backgroundColor: Color(0xFF10B981), 
-            ),
-          );
-          Navigator.pop(context); 
-        }
+      await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(uidUser)
+          .set(nuevoUsuario.toMap());
 
-      } on FirebaseAuthException catch (e) {
-        String mensajeError = 'Ocurrió un error en el registro.';
-        if (e.code == 'email-already-in-use') {
-          mensajeError = 'Este correo electrónico ya está registrado.';
-        } else if (e.code == 'weak-password') {
-          mensajeError = 'La contraseña es demasiado débil (mínimo 6 caracteres).';
-        }
-        
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(mensajeError), backgroundColor: const Color(0xFFFF3366)),
+          const SnackBar(
+            content: Text('✔️ ¡Usuario registrado con éxito en el sistema!'),
+            backgroundColor: Color(0xFF10B981),
+          ),
         );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: const Color(0xFFFF3366)),
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const MainNavigation()),
+          (route) => false,
         );
-      } finally {
-        if (mounted) setState(() => _isLoading = false);
       }
+    } on FirebaseAuthException catch (e) {
+      String mensajeError = 'Ocurrió un error en el registro. Intentá de nuevo.';
+      if (e.code == 'email-already-in-use') {
+        mensajeError = 'Este correo ya se encuentra registrado. Iniciá sesión.';
+      } else if (e.code == 'weak-password') {
+        mensajeError = 'La contraseña es muy débil. Usá al menos 6 caracteres combinando letras y números.';
+      } else if (e.code == 'invalid-email') {
+        mensajeError = 'El formato de correo no es válido.';
+      }
+
+      _mostrarError(mensajeError);
+    } catch (e) {
+      _mostrarError('Error de red o inesperado. Verificá tu conexión e intentá de nuevo.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -132,12 +149,6 @@ class _RegistroScreenState extends State<RegistroScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_isLoading)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 16.0),
-                    child: LinearProgressIndicator(color: Color(0xFF6366F1)),
-                  ),
-
                 const Icon(Icons.person_add_alt_1_rounded, size: 60, color: Color(0xFF6366F1)),
                 const SizedBox(height: 16),
                 const Text(
@@ -194,7 +205,9 @@ class _RegistroScreenState extends State<RegistroScreen> {
                   keyboardType: TextInputType.emailAddress,
                   style: const TextStyle(color: Colors.white),
                   decoration: _inputStyle('Correo Electrónico', Icons.email_outlined),
-                  validator: (v) => (v == null || !v.contains('@')) ? 'Email inválido' : null,
+                  validator: (v) => (v == null || !RegExp(r'^[\w\.\-]+@[\w\.\-]+\.\w+$').hasMatch(v.trim()))
+                      ? 'El email no es válido'
+                      : null,
                 ),
                 const SizedBox(height: 16),
 
@@ -217,7 +230,14 @@ class _RegistroScreenState extends State<RegistroScreen> {
                       },
                     ),
                   ),
-                  validator: (v) => (v == null || v.length < 6) ? 'Mínimo 6 caracteres' : null,
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Ingresá una contraseña';
+                    if (v.length < 6) return 'Mínimo 6 caracteres';
+                    final hasLetter = RegExp(r'[a-zA-Z]').hasMatch(v);
+                    final hasNumber = RegExp(r'[0-9]').hasMatch(v);
+                    if (!hasLetter || !hasNumber) return 'Combiná letras y números';
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
 
@@ -264,7 +284,16 @@ class _RegistroScreenState extends State<RegistroScreen> {
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text('Registrarme', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2.5,
+                            ),
+                          )
+                        : const Text('Registrarme', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
                 const SizedBox(height: 24),

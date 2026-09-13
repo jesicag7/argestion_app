@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Para impactar en Firebase
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dashboard_screen.dart';
-import 'models/factura_model.dart'; // El modelo de datos que definimos
+import 'models/factura_model.dart';
 import 'historial_facturas_screen.dart';
+import 'facturacion_screen.dart';
+import 'pagos_screen.dart';
 
 class ItemFactura {
   final Key key = UniqueKey(); 
@@ -27,6 +30,8 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
   final _formKey = GlobalKey<FormState>(); 
   List<ItemFactura> _listaFacturas = [ItemFactura()]; 
   bool _isLoading = false; // Estado de carga para Firebase
+
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
   @override
   void dispose() {
@@ -57,12 +62,22 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
       setState(() => _isLoading = true);
       
       try {
+        if (_uid == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Iniciá sesión para poder facturar'),
+              backgroundColor: Color(0xFFFF3366),
+            ),
+          );
+          return;
+        }
+
         final collection = FirebaseFirestore.instance.collection('facturas');
         
         // Recorremos las facturas cargadas en la pantalla y las subimos una por una
         for (var item in _listaFacturas) {
           final nuevaFactura = FacturaModel(
-            idUsuario: 'usr_test_emanuel', // 💻 Usamos los milisegundos de la hora actual para generar un nro único compatible con Web
+            idUsuario: _uid!,
             nroFactura: '0001-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}',
             cuitCliente: item.dniController.text,
             nombreCliente: item.nombreController.text,
@@ -285,15 +300,6 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
   }
 }
 
-// --- Pantallas secundarias en Modo Oscuro ---
-class PagosScreen extends StatelessWidget {
-  const PagosScreen({super.key}); 
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(backgroundColor: Color(0xFF0F172A), body: Center(child: Text('Pantalla de Pagos', style: TextStyle(color: Colors.white))));
-  }
-}
-
 class ReportesScreen extends StatelessWidget {
   const ReportesScreen({super.key}); 
   @override
@@ -325,7 +331,10 @@ class _MainNavigationState extends State<MainNavigation> {
     // Definimos las pantallas acá adentro para pasarle la función del botón dinámicamente
     final List<Widget> screens = [
       DashboardScreen(
-        onVerFacturasPressed: () {
+        onNuevaFacturaPressed: () {
+          setState(() => _currentIndex = 1);
+        },
+        onVerHistorialPressed: () {
           // 🚀 Navega a la ventana independiente del Historial
           Navigator.push(
             context,
@@ -333,7 +342,11 @@ class _MainNavigationState extends State<MainNavigation> {
           );
         },
       ),
-      const FacturacionScreen(),
+      FacturaExpressScreen(
+        onVolverAlInicio: () {
+          setState(() => _currentIndex = 0);
+        },
+      ),
       const PagosScreen(),
       const ReportesScreen(),
       const AyudaScreen(),
