@@ -6,6 +6,7 @@ import 'models/factura_model.dart';
 import 'historial_facturas_screen.dart';
 import 'facturacion_screen.dart';
 import 'pagos_screen.dart';
+import 'reportes_screen.dart';
 
 class ItemFactura {
   final Key key = UniqueKey(); 
@@ -297,14 +298,6 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8), 
     );
-  }
-}
-
-class ReportesScreen extends StatelessWidget {
-  const ReportesScreen({super.key}); 
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(backgroundColor: Color(0xFF0F172A), body: Center(child: Text('Pantalla de Reportes', style: TextStyle(color: Colors.white))));
   }
 }
 
