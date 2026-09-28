@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'main_navigation.dart';
 import 'registro_screen.dart';
+import 'services/biometric_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,10 +14,29 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
+  bool _isBiometricLoading = false;
+  bool _biometricsAvailable = false;
   bool _obscurePassword = true;
+
+  final BiometricService _biometricService = BiometricService();
 
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+
+  /// Bloquea el formulario completo mientras hay una autenticación en curso,
+  /// para no permitir dos operaciones simultáneas.
+  bool get _isBusy => _isLoading || _isBiometricLoading;
+
+  @override
+  void initState() {
+    super.initState();
+    _chequearBiometria();
+  }
+
+  Future<void> _chequearBiometria() async {
+    final disponible = await _biometricService.isAvailable();
+    if (mounted) setState(() => _biometricsAvailable = disponible);
+  }
 
   @override
   void dispose() {
@@ -35,7 +55,19 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  void _mostrarAviso(String mensaje) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensaje, style: const TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1E293B),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Future<void> _iniciarSesion() async {
+    if (_isBusy) return;
+
     if (!_formKey.currentState!.validate()) {
       _mostrarError('Ingresá tu correo electrónico y tu contraseña para iniciar sesión.');
       return;
@@ -77,6 +109,54 @@ class _LoginScreenState extends State<LoginScreen> {
       _mostrarError('Error de red o inesperado. Verificá tu conexión e intentá de nuevo.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// La biometría no genera una sesión de Firebase por sí sola: funciona como
+  /// un velo de seguridad sobre la sesión ya persistida. Si el usuario nunca
+  /// ingresó con correo y contraseña, no hay nada que desbloquear.
+  Future<void> _autenticarConBiometria() async {
+    if (_isBusy) return;
+
+    FocusScope.of(context).unfocus();
+    setState(() => _isBiometricLoading = true);
+
+    try {
+      final resultado = await _biometricService.authenticate();
+
+      if (!mounted) return;
+
+      if (resultado.isAuthenticated) {
+        if (resultado.message != null) {
+          _mostrarAviso(resultado.message!);
+        }
+
+        if (FirebaseAuth.instance.currentUser == null) {
+          _mostrarError(
+            'Tu sesión venció. Ingresá con tu correo y contraseña una vez para activar el acceso biométrico.',
+          );
+          return;
+        }
+
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const MainNavigation()),
+          (route) => false,
+        );
+        return;
+      }
+
+      if (resultado.status == BiometricStatus.cancelled) {
+        return;
+      }
+
+      if (resultado.message != null) {
+        _mostrarError(resultado.message!);
+      }
+    } catch (e) {
+      _mostrarError('No pudimos verificar tu identidad. Intentá de nuevo.');
+    } finally {
+      if (mounted) setState(() => _isBiometricLoading = false);
     }
   }
 
@@ -143,7 +223,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 TextFormField(
                   controller: _emailController,
-                  enabled: !_isLoading,
+                  enabled: !_isBusy,
                   keyboardType: TextInputType.emailAddress,
                   style: const TextStyle(color: Colors.white),
                   decoration: _inputStyle('Correo Electrónico', Icons.email_outlined),
@@ -159,7 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 TextFormField(
                   controller: _passwordController,
-                  enabled: !_isLoading,
+                  enabled: !_isBusy,
                   obscureText: _obscurePassword,
                   style: const TextStyle(color: Colors.white),
                   decoration: _inputStyle(
@@ -189,9 +269,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _iniciarSesion,
+                    onPressed: _isBusy ? null : _iniciarSesion,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
+                      disabledBackgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -210,6 +291,80 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 24),
 
+                if (_biometricsAvailable) ...[
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Divider(color: Color(0xFF334155), thickness: 1),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(
+                          'o ingresá con',
+                          style: TextStyle(
+                            color: Color(0xFF64748B),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      const Expanded(
+                        child: Divider(color: Color(0xFF334155), thickness: 1),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  Container(
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF334155), width: 1.5),
+                    ),
+                    child: ElevatedButton(
+                      onPressed: _isBusy ? null : _autenticarConBiometria,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        disabledBackgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        foregroundColor: const Color(0xFFE2E8F0),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: _isBiometricLoading
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                color: Color(0xFF6366F1),
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.fingerprint_rounded,
+                                  color: Color(0xFF6366F1),
+                                  size: 24,
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Acceso biométrico',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isBusy
+                                        ? const Color(0xFF64748B)
+                                        : const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -218,7 +373,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(color: Color(0xFF94A3B8)),
                     ),
                     TextButton(
-                      onPressed: _isLoading
+                      onPressed: _isBusy
                           ? null
                           : () {
                               Navigator.push(
