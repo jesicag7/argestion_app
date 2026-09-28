@@ -41,10 +41,35 @@ class _FacturaExpressScreenState extends State<FacturaExpressScreen> {
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _userStream;
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _facturasStream;
+  Map<String, dynamic>? _lastUserData;
+  List<QueryDocumentSnapshot<Map<String, dynamic>>>? _lastFacturasDocs;
+
   @override
   void initState() {
     super.initState();
+    _initStreams();
     _montoController.addListener(() => setState(() {}));
+  }
+
+  void _initStreams() {
+    final uid = _uid;
+    if (uid != null) {
+      _userStream = FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(uid)
+          .snapshots();
+      _facturasStream = FirebaseFirestore.instance
+          .collection('facturas')
+          .where(
+            Filter.or(
+              Filter('userId', isEqualTo: uid),
+              Filter('id_usuario', isEqualTo: uid),
+            ),
+          )
+          .snapshots();
+    }
   }
 
   @override
@@ -141,9 +166,12 @@ class _FacturaExpressScreenState extends State<FacturaExpressScreen> {
         fechaEmision: fecha,
       );
 
+      final facturaData = nuevaFactura.toMap();
+      facturaData['userId'] = FirebaseAuth.instance.currentUser!.uid;
+
       await FirebaseFirestore.instance
           .collection('facturas')
-          .add(nuevaFactura.toMap());
+          .add(facturaData);
 
       if (!mounted) return;
 
@@ -235,6 +263,30 @@ class _FacturaExpressScreenState extends State<FacturaExpressScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final uid = _uid;
+    if (uid == null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0F172A),
+        appBar: AppBar(
+          title: const Text(
+            'Factura Express',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          automaticallyImplyLeading: false,
+        ),
+        body: const Center(
+          child: Text('Iniciá sesión para facturar',
+              style: TextStyle(color: Color(0xFF94A3B8))),
+        ),
+      );
+    }
+
+    if (_userStream == null || _facturasStream == null) {
+      _initStreams();
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF0F172A),
       appBar: AppBar(
@@ -246,46 +298,43 @@ class _FacturaExpressScreenState extends State<FacturaExpressScreen> {
         elevation: 0,
         automaticallyImplyLeading: false,
       ),
-      body: _uid == null
-          ? const Center(
-              child: Text('Iniciá sesión para facturar',
-                  style: TextStyle(color: Color(0xFF94A3B8))))
-          : _buildContenido(context),
+      body: _buildContenido(context),
     );
   }
 
   Widget _buildContenido(BuildContext context) {
-    final uid = _uid!;
-
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('usuarios').doc(uid).snapshots(),
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _userStream,
       builder: (context, userSnap) {
-        if (userSnap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Color(0xFF10B981)));
+        if (userSnap.hasData) {
+          _lastUserData = userSnap.data?.data();
         }
 
-        Map<String, dynamic>? userData;
-        try {
-          userData = userSnap.data?.data() as Map<String, dynamic>?;
-        } catch (_) {
-          userData = null;
+        if (_lastUserData == null &&
+            userSnap.connectionState == ConnectionState.waiting) {
+          return const Center(
+              child: CircularProgressIndicator(color: Color(0xFF10B981)));
         }
-        final categoria = _normalizarCategoria(userData?['categoria'] as String?);
+
+        final categoria =
+            _normalizarCategoria(_lastUserData?['categoria'] as String?);
         final tope = _topesMonotributo[categoria] ?? _topesMonotributo['A']!;
 
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('facturas')
-              .where('id_usuario', isEqualTo: uid)
-              .snapshots(),
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _facturasStream,
           builder: (context, facSnap) {
-            if (facSnap.connectionState == ConnectionState.waiting) {
+            if (facSnap.hasData) {
+              _lastFacturasDocs = facSnap.data?.docs;
+            }
+
+            if (_lastFacturasDocs == null &&
+                facSnap.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(color: Color(0xFF10B981)));
             }
 
             final ahora = DateTime.now();
-            final facturado = _sumarUltimos12Meses(facSnap.data?.docs, ahora);
+            final facturado = _sumarUltimos12Meses(_lastFacturasDocs, ahora);
             final saldo = (tope - facturado).clamp(0.0, double.infinity);
             final mesesRestantes = (12 - ahora.month + 1).clamp(1, 12);
             final cupo = saldo / mesesRestantes;

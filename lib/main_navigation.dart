@@ -7,6 +7,7 @@ import 'historial_facturas_screen.dart';
 import 'facturacion_screen.dart';
 import 'pagos_screen.dart';
 import 'reportes_screen.dart';
+import 'ayuda_screen.dart';
 
 class ItemFactura {
   final Key key = UniqueKey(); 
@@ -87,8 +88,11 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
             fechaEmision: DateTime.now(),
             );
 
+          final facturaData = nuevaFactura.toMap();
+          facturaData['userId'] = FirebaseAuth.instance.currentUser!.uid;
+
           // Sube el mapa JSON a Firestore
-          await collection.add(nuevaFactura.toMap());
+          await collection.add(facturaData);
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -301,13 +305,6 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
   }
 }
 
-class AyudaScreen extends StatelessWidget {
-  const AyudaScreen({super.key}); 
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(backgroundColor: Color(0xFF0F172A), body: Center(child: Text('Pantalla de Ayuda', style: TextStyle(color: Colors.white))));
-  }
-}
 
 // --- Arquitectura de Navegación Unificada ---
 class MainNavigation extends StatefulWidget {

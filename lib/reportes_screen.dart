@@ -1,4 +1,4 @@
-﻿import 'dart:html' as html;
+import 'dart:html' as html;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -132,6 +132,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
 
     final facturasStream = FirebaseFirestore.instance
         .collection('facturas')
+        .where('userId', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
         .snapshots();
 
     return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
