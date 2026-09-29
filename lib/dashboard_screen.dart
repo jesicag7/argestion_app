@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   final VoidCallback? onNuevaFacturaPressed;
@@ -88,39 +89,31 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
-      appBar: AppBar(
-        title: const Text(
-          'ARGestión',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+    if (_uid == null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0F172A),
+        appBar: AppBar(
+          title: const Text(
+            'ARGestión',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          automaticallyImplyLeading: false,
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        actions: const [
-          Icon(Icons.notifications, color: Colors.white),
-          SizedBox(width: 15),
-          Icon(Icons.person, color: Colors.white),
-          SizedBox(width: 15),
-        ],
-      ),
-      body: _uid == null
-          ? const Center(
-              child: Text('Iniciá sesión para ver tu panel',
-                  style: TextStyle(color: Color(0xFF94A3B8))))
-          : _buildContenido(context, _uid!),
-    );
-  }
+        body: const Center(
+          child: Text('Iniciá sesión para ver tu panel',
+              style: TextStyle(color: Color(0xFF94A3B8))),
+        ),
+      );
+    }
 
-  Widget _buildContenido(BuildContext context, String uid) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('usuarios').doc(uid).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(_uid)
+          .snapshots(),
       builder: (context, userSnap) {
-        if (userSnap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Color(0xFF10B981)));
-        }
-
         Map<String, dynamic>? userData;
         try {
           userData = userSnap.data?.data() as Map<String, dynamic>?;
@@ -128,17 +121,335 @@ class DashboardScreen extends StatelessWidget {
           userData = null;
         }
 
-        final tienePerfil = userData != null;
-        final categoria = _normalizarCategoria(userData?['categoria'] as String?);
-        final tope = _topesMonotributo[categoria] ?? _topesMonotributo['A']!;
-        final nombreUsuario = userData?['nombre'] as String? ?? '';
+        final authUser = FirebaseAuth.instance.currentUser;
+        final firestoreName = userData?['nombre'] as String?;
+        final authName = authUser?.displayName;
+        final resolvedName = (firestoreName != null && firestoreName.trim().isNotEmpty)
+            ? firestoreName.trim()
+            : ((authName != null && authName.trim().isNotEmpty)
+                ? authName.trim()
+                : 'Usuario');
+        final email =
+            authUser?.email ?? (userData?['email'] as String? ?? 'Sin correo');
+        final cuit = userData?['cuit'] as String?;
+        final categoria =
+            _normalizarCategoria(userData?['categoria'] as String?);
+        final primerNombre = resolvedName.split(' ').first;
+        final inicial =
+            resolvedName.isNotEmpty ? resolvedName[0].toUpperCase() : 'U';
 
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('facturas')
-              .where('id_usuario', isEqualTo: uid)
-              .snapshots(),
-          builder: (context, facSnap) {
+        return Scaffold(
+          backgroundColor: const Color(0xFF0F172A),
+          appBar: AppBar(
+            title: const Text(
+              'ARGestión',
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            automaticallyImplyLeading: false,
+            actions: [
+              IconButton(
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.notifications_outlined,
+                        color: Colors.white, size: 24),
+                    Positioned(
+                      top: 1,
+                      right: 1,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                tooltip: 'Notificaciones',
+                onPressed: () => _mostrarNotificaciones(context),
+              ),
+              const SizedBox(width: 4),
+              _buildMenuUsuario(
+                context: context,
+                inicial: inicial,
+                primerNombre: primerNombre,
+                resolvedName: resolvedName,
+                email: email,
+                cuit: cuit,
+                categoria: categoria,
+              ),
+            ],
+          ),
+          body: _buildFacturasBody(
+            context: context,
+            uid: _uid!,
+            userData: userData,
+            categoria: categoria,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMenuUsuario({
+    required BuildContext context,
+    required String inicial,
+    required String primerNombre,
+    required String resolvedName,
+    required String email,
+    String? cuit,
+    required String categoria,
+  }) {
+    return PopupMenuButton<String>(
+      tooltip: 'Menú de usuario',
+      color: const Color(0xFF1E293B),
+      elevation: 8,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: Color(0xFF334155)),
+      ),
+      offset: const Offset(0, 52),
+      onSelected: (value) {
+        if (value == 'perfil') {
+          _mostrarPerfil(context);
+        } else if (value == 'cerrar_sesion') {
+          _cerrarSesion(context);
+        }
+      },
+      itemBuilder: (context) => [
+        // Header no cliqueable con avatar, nombre, CUIT/email y badge
+        PopupMenuItem<String>(
+          enabled: false,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        inicial,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          resolvedName,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          (cuit != null && cuit.trim().isNotEmpty)
+                              ? 'CUIT: ${cuit.trim()} • $email'
+                              : email,
+                          style: const TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 11.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF10B981),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Cat. $categoria - Al día',
+                      style: const TextStyle(
+                        color: Color(0xFF10B981),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(height: 1),
+        const PopupMenuItem<String>(
+          value: 'perfil',
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.person_rounded, color: Color(0xFF10B981), size: 20),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Mi Perfil',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    Text(
+                      'Datos fiscales y categoría de monotributo',
+                      style: TextStyle(
+                        color: Color(0xFF94A3B8),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(height: 1),
+        const PopupMenuItem<String>(
+          value: 'cerrar_sesion',
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.logout_rounded, color: Color(0xFFFF3366), size: 20),
+              SizedBox(width: 12),
+              Text(
+                'Cerrar Sesión',
+                style: TextStyle(
+                  color: Color(0xFFFF3366),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        margin: const EdgeInsets.only(right: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E293B),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFF334155)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  inicial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 90),
+              child: Text(
+                primerNombre,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Color(0xFF94A3B8),
+              size: 18,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFacturasBody({
+    required BuildContext context,
+    required String uid,
+    required Map<String, dynamic>? userData,
+    required String categoria,
+  }) {
+    final tienePerfil = userData != null;
+    final tope = _topesMonotributo[categoria] ?? _topesMonotributo['A']!;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('facturas')
+          .where('id_usuario', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, facSnap) {
             if (facSnap.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(color: Color(0xFF10B981)));
@@ -170,12 +481,9 @@ class DashboardScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (nombreUsuario.isNotEmpty) ...[
-                    Text('Hola, $nombreUsuario',
-                        style: const TextStyle(
-                            color: Color(0xFF94A3B8), fontSize: 13)),
-                    const SizedBox(height: 8),
-                  ],
+                  // Saludo de bienvenida con estilo y nombre del usuario
+                  _buildSaludoBienvenida(userData),
+                  const SizedBox(height: 16),
                   if (!tienePerfil) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -333,8 +641,6 @@ class DashboardScreen extends StatelessWidget {
             );
           },
         );
-      },
-    );
   }
 
   Widget _buildMiniDato(String title, String value) {
@@ -429,6 +735,561 @@ class DashboardScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSaludoBienvenida(Map<String, dynamic>? userData) {
+    final authUser = FirebaseAuth.instance.currentUser;
+    final firestoreName = userData?['nombre'] as String?;
+    final authName = authUser?.displayName;
+
+    String resolvedName = 'Usuario';
+    if (firestoreName != null && firestoreName.trim().isNotEmpty) {
+      resolvedName = firestoreName.trim();
+    } else if (authName != null && authName.trim().isNotEmpty) {
+      resolvedName = authName.trim();
+    }
+
+    final ahora = DateTime.now();
+    final meses = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    final mesActual = meses[ahora.month - 1];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 460;
+
+        final etiquetaFiscal = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: const Color(0xFF10B981).withValues(alpha: 0.3),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment:
+                isCompact ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF10B981),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Estado: Al día',
+                    style: TextStyle(
+                      color: Color(0xFF10B981),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Período $mesActual ${ahora.year}',
+                style: const TextStyle(
+                  color: Color(0xFF94A3B8),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF334155)),
+          ),
+          child: isCompact
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.waving_hand_rounded,
+                            color: Color(0xFF10B981),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '¡Bienvenido a ARGestión, $resolvedName!',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15.5,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Panel de control fiscal y estado de monotributo',
+                                style: TextStyle(
+                                  color: Color(0xFF94A3B8),
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    etiquetaFiscal,
+                  ],
+                )
+              : Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.waving_hand_rounded,
+                        color: Color(0xFF10B981),
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '¡Bienvenido a ARGestión, $resolvedName!',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          const Text(
+                            'Panel de control fiscal y estado de monotributo',
+                            style: TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    etiquetaFiscal,
+                  ],
+                ),
+        );
+      },
+    );
+  }
+
+  void _mostrarPerfil(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid;
+    final email = user?.email ?? 'Sin correo registrado';
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StreamBuilder<DocumentSnapshot>(
+          stream: uid != null
+              ? FirebaseFirestore.instance.collection('usuarios').doc(uid).snapshots()
+              : null,
+          builder: (context, snapshot) {
+            Map<String, dynamic>? data;
+            if (snapshot.hasData && snapshot.data!.exists) {
+              try {
+                data = snapshot.data!.data() as Map<String, dynamic>?;
+              } catch (_) {
+                data = null;
+              }
+            }
+
+            final firestoreName = data?['nombre'] as String?;
+            final authName = user?.displayName;
+            final nombre = (firestoreName != null && firestoreName.trim().isNotEmpty)
+                ? firestoreName.trim()
+                : ((authName != null && authName.trim().isNotEmpty)
+                    ? authName.trim()
+                    : 'Usuario');
+
+            final categoria = _normalizarCategoria(data?['categoria'] as String?);
+            final cuit = data?['cuit'] as String? ?? 'No registrado';
+
+            return Dialog(
+              backgroundColor: const Color(0xFF1E293B),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Color(0xFF334155)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(22.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF059669), Color(0xFF10B981)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          nombre.isNotEmpty ? nombre[0].toUpperCase() : 'U',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      nombre,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      email,
+                      style: const TextStyle(
+                        color: Color(0xFF94A3B8),
+                        fontSize: 13,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildPerfilRow(
+                            icon: Icons.category_rounded,
+                            iconColor: const Color(0xFF10B981),
+                            label: 'Categoría Monotributo',
+                            value: 'Categoría $categoria',
+                          ),
+                          const Divider(color: Color(0xFF1E293B), height: 16),
+                          _buildPerfilRow(
+                            icon: Icons.badge_outlined,
+                            iconColor: const Color(0xFF6366F1),
+                            label: 'CUIT / Identificación',
+                            value: cuit,
+                          ),
+                          const Divider(color: Color(0xFF1E293B), height: 16),
+                          _buildPerfilRow(
+                            icon: Icons.mail_outline_rounded,
+                            iconColor: const Color(0xFF38BDF8),
+                            label: 'Correo Electrónico',
+                            value: email,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(dialogCtx).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF334155),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        child: const Text('Cerrar',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildPerfilRow({
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: iconColor, size: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 11,
+                ),
+              ),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _cerrarSesion(BuildContext context) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFF334155)),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: Color(0xFFFF3366), size: 22),
+            SizedBox(width: 10),
+            Text('Cerrar Sesión',
+                style: TextStyle(color: Colors.white, fontSize: 18)),
+          ],
+        ),
+        content: const Text(
+          '¿Estás seguro de que deseas salir de tu cuenta?',
+          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: Color(0xFF94A3B8))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF3366),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Salir',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar == true && context.mounted) {
+      await FirebaseAuth.instance.signOut();
+      if (context.mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    }
+  }
+
+  void _mostrarNotificaciones(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return Dialog(
+          backgroundColor: const Color(0xFF1E293B),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Color(0xFF334155)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.notifications_active_outlined,
+                        color: Color(0xFF10B981),
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Notificaciones y Avisos',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildNotificationItem(
+                  icon: Icons.calendar_month_rounded,
+                  iconColor: const Color(0xFFF59E0B),
+                  titulo: 'Vencimiento Monotributo',
+                  descripcion:
+                      'La cuota mensual vence el día 20 de cada mes. Podés generar tu VEP o revisar el estado en la pestaña Pagos.',
+                ),
+                const SizedBox(height: 10),
+                _buildNotificationItem(
+                  icon: Icons.sync_alt_rounded,
+                  iconColor: const Color(0xFF6366F1),
+                  titulo: 'Recategorización Semestral',
+                  descripcion:
+                      'ARCA evalúa los ingresos en enero y julio. Verificá tu semáforo fiscal en Reportes.',
+                ),
+                const SizedBox(height: 10),
+                _buildNotificationItem(
+                  icon: Icons.check_circle_outline_rounded,
+                  iconColor: const Color(0xFF10B981),
+                  titulo: 'Estado de cuenta al día',
+                  descripcion:
+                      'No tenés alertas urgentes de exclusión en este momento.',
+                ),
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF10B981),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text('Entendido',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildNotificationItem({
+    required IconData icon,
+    required Color iconColor,
+    required String titulo,
+    required String descripcion,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF334155)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: iconColor, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  descripcion,
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -22,12 +22,22 @@ class _ChatMessage {
 
 class _AyudaScreenState extends State<AyudaScreen> {
   static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
+  static const String _backupApiKey =
+      String.fromEnvironment('GEMINI_BACKUP_API_KEY');
 
-  bool get _isKeyConfigured => _apiKey.trim().isNotEmpty;
+  String _activeApiKey = _apiKey.isNotEmpty ? _apiKey : _backupApiKey;
 
-  // Modelos oficiales vigentes de Google
+  bool get _isKeyConfigured => _activeApiKey.trim().isNotEmpty;
+
+  // Modelos oficiales vigentes y compatibles
   static const String _primaryModel = 'gemini-2.5-flash';
-  static const String _fallbackModel = 'gemini-flash-latest';
+  static const List<String> _compatibleModels = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-latest',
+  ];
 
   String _modelName = _primaryModel;
 
@@ -216,7 +226,7 @@ Topes anuales que usa la app (referencia)
 
     return GenerativeModel(
       model: cleanModelName,
-      apiKey: _apiKey,
+      apiKey: _activeApiKey,
       systemInstruction: Content.system(_systemPrompt),
     );
   }
@@ -240,9 +250,12 @@ Topes anuales que usa la app (referencia)
                 '(facturación, notas de crédito, recategorización y normativas de ARCA).\n\n'
                 'Podés elegir una pregunta frecuente o escribirme tu consulta abajo.'
             : '⚠️ **API Key de Gemini no configurada**\n\n'
-                'Para habilitar el Asistente Inteligente, proporcioná tu clave de Gemini ejecutando la app con:\n\n'
-                '`flutter run --dart-define=GEMINI_API_KEY=tu_api_key`\n\n'
-                'O configurala en tus variables de entorno / configuración de ejecución.',
+                'Para habilitar el Asistente Inteligente, se debe proveer la clave mediante `--dart-define` al compilar o ejecutar la app:\n\n'
+                '```bash\n'
+                'flutter run --dart-define=GEMINI_API_KEY=tu_api_key\n'
+                '```\n\n'
+                'Opcionalmente también podés proveer una clave de respaldo:\n'
+                '`--dart-define=GEMINI_BACKUP_API_KEY=tu_backup_key`',
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -273,7 +286,7 @@ Topes anuales que usa la app (referencia)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Falta configurar la API Key de Gemini. Ejecuta con --dart-define=GEMINI_API_KEY=...',
+            'Se debe proveer la clave mediante --dart-define=GEMINI_API_KEY=tu_api_key',
             style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Color(0xFFEF4444),
@@ -289,8 +302,8 @@ Topes anuales que usa la app (referencia)
         _messages.add(_ChatMessage(
           text:
               '⚠️ **No se pudo enviar la consulta**: Falta configurar la API Key de Gemini.\n\n'
-              'Iniciá la aplicación pasando el parámetro:\n'
-              '`--dart-define=GEMINI_API_KEY=tu_api_key`',
+              'Se debe proveer la clave mediante `--dart-define`:\n\n'
+              '`flutter run --dart-define=GEMINI_API_KEY=tu_api_key`',
           isUser: false,
           timestamp: DateTime.now(),
         ));
@@ -313,7 +326,8 @@ Topes anuales que usa la app (referencia)
 
     final candidateModels = [
       _modelName,
-      if (_modelName != _fallbackModel) _fallbackModel,
+      for (final m in _compatibleModels)
+        if (m != _modelName) m,
     ];
 
     for (int i = 0; i < candidateModels.length; i++) {
@@ -332,16 +346,34 @@ Topes anuales que usa la app (referencia)
           break; // Éxito con este modelo
         }
       } catch (e, stackTrace) {
-        debugPrint('Error en Gemini: $e');
-        debugPrint('StackTrace: $stackTrace');
+        debugPrint('>>> ERROR EXACTO ASISTENTE: $e');
+        debugPrint('>>> STACKTRACE: $stackTrace');
 
         final errorStr = e.toString();
+
+        final isAuthError = errorStr.contains('401') ||
+            errorStr.contains('UNAUTHENTICATED') ||
+            errorStr.contains('API_KEY_SERVICE_BLOCKED') ||
+            errorStr.contains('invalid authentication credentials');
+
+        // Si la clave primaria falla por 401 y disponemos de clave de respaldo, cambiamos y reintentamos
+        if (isAuthError && _backupApiKey.isNotEmpty && _activeApiKey != _backupApiKey) {
+          debugPrint('>>> Reintentando con API Key de respaldo...');
+          _activeApiKey = _backupApiKey;
+          _model = _createModel(_modelName);
+          _chatSession = _model!.startChat();
+          i--;
+          continue;
+        }
+
         final isNotFound = errorStr.contains('404') ||
+            errorStr.contains('503') ||
             errorStr.contains('NOT_FOUND') ||
             errorStr.contains('not found') ||
-            errorStr.contains('no longer available');
+            errorStr.contains('no longer available') ||
+            errorStr.contains('high demand');
 
-        // Si es 404 / no longer available y hay alternativas, probamos la siguiente
+        // Si es 404 / 503 / no longer available y hay alternativas, probamos la siguiente
         if (isNotFound && i < candidateModels.length - 1) {
           continue;
         }
@@ -410,16 +442,16 @@ Topes anuales que usa la app (referencia)
                     Container(
                       width: 7,
                       height: 7,
-                      decoration: const BoxDecoration(
-                        color: greenOnline,
+                      decoration: BoxDecoration(
+                        color: _isKeyConfigured ? greenOnline : const Color(0xFFF59E0B),
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 5),
-                    const Text(
-                      'En línea',
+                    Text(
+                      _isKeyConfigured ? 'En línea' : 'Sin API Key',
                       style: TextStyle(
-                        color: greenOnline,
+                        color: _isKeyConfigured ? greenOnline : const Color(0xFFF59E0B),
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -455,6 +487,31 @@ Topes anuales que usa la app (referencia)
       ),
       body: Column(
         children: [
+          // Banner de aviso si falta configurar la clave
+          if (!_isKeyConfigured)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: Color(0xFFF59E0B), size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'API Key no detectada. Proveer mediante --dart-define=GEMINI_API_KEY=tu_clave',
+                      style: TextStyle(
+                        color: Color(0xFFFDE68A),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Barra de sugerencias rápidas
           _buildSugerencias(),
 
