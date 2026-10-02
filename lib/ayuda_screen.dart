@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'services/gemini_service.dart';
 
 class AyudaScreen extends StatefulWidget {
   const AyudaScreen({super.key});
@@ -21,9 +21,8 @@ class _ChatMessage {
 }
 
 class _AyudaScreenState extends State<AyudaScreen> {
-  static const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
-  static const String _backupApiKey =
-      String.fromEnvironment('GEMINI_BACKUP_API_KEY');
+  static const String _apiKey = geminiApiKey;
+  static const String _backupApiKey = geminiBackupApiKey;
 
   String _activeApiKey = _apiKey.isNotEmpty ? _apiKey : _backupApiKey;
 
@@ -198,9 +197,6 @@ Topes anuales que usa la app (referencia)
     '¿Cómo me pueden excluir de oficio?',
   ];
 
-  GenerativeModel? _model;
-  ChatSession? _chatSession;
-
   final List<_ChatMessage> _messages = [];
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -219,26 +215,7 @@ Topes anuales que usa la app (referencia)
     super.dispose();
   }
 
-  GenerativeModel _createModel(String modelName) {
-    final cleanModelName = modelName.startsWith('models/')
-        ? modelName.substring('models/'.length)
-        : modelName;
-
-    return GenerativeModel(
-      model: cleanModelName,
-      apiKey: _activeApiKey,
-      systemInstruction: Content.system(_systemPrompt),
-    );
-  }
-
   void _resetConversation() {
-    if (_isKeyConfigured) {
-      _model = _createModel(_modelName);
-      _chatSession = _model!.startChat();
-    } else {
-      _model = null;
-      _chatSession = null;
-    }
     _messages.clear();
     _messages.add(
       _ChatMessage(
@@ -330,19 +307,28 @@ Topes anuales que usa la app (referencia)
         if (m != _modelName) m,
     ];
 
+    final history = _messages
+        .where((m) => m.text.isNotEmpty)
+        .map((m) => {
+              'role': m.isUser ? 'user' : 'model',
+              'text': m.text,
+            })
+        .toList();
+
     for (int i = 0; i < candidateModels.length; i++) {
       final currentCandidate = candidateModels[i];
       try {
-        if (currentCandidate != _modelName || _chatSession == null) {
-          debugPrint('Probando modelo: $currentCandidate');
-          _modelName = currentCandidate;
-          _model = _createModel(_modelName);
-          _chatSession = _model!.startChat();
-        }
-
-        final response = await _chatSession!.sendMessage(Content.text(text));
-        reply = response.text?.trim();
+        debugPrint('Consultando modelo $currentCandidate mediante GeminiService HTTP...');
+        final serviceResponse = await GeminiService.sendMessage(
+          prompt: text,
+          model: currentCandidate,
+          systemInstruction: _systemPrompt,
+          history: history,
+          customApiKey: _activeApiKey,
+        );
+        reply = serviceResponse?.trim();
         if (reply != null && reply.isNotEmpty) {
+          _modelName = currentCandidate;
           break; // Éxito con este modelo
         }
       } catch (e, stackTrace) {
@@ -360,8 +346,6 @@ Topes anuales que usa la app (referencia)
         if (isAuthError && _backupApiKey.isNotEmpty && _activeApiKey != _backupApiKey) {
           debugPrint('>>> Reintentando con API Key de respaldo...');
           _activeApiKey = _backupApiKey;
-          _model = _createModel(_modelName);
-          _chatSession = _model!.startChat();
           i--;
           continue;
         }

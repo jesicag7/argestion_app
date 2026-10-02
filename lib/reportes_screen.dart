@@ -1,8 +1,8 @@
-import 'dart:html' as html;
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import 'services/csv_exporter.dart';
 
 class ReportesScreen extends StatefulWidget {
   const ReportesScreen({super.key});
@@ -23,7 +23,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
           (match) => '${match.group(1)}.',
         );
 
-    return '\$${formatted}';
+    return '\$$formatted';
   }
 
   double _getTopeAnual(Map<String, dynamic>? data) {
@@ -94,7 +94,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       buffer.writeln('$fecha,"$concepto",${monto.toStringAsFixed(2)}');
     }
 
-    buffer.writeln('Total Facturado,${cantidadFacturas} facturas,${totalFacturado.toStringAsFixed(2)}');
+    buffer.writeln('Total Facturado,$cantidadFacturas facturas,${totalFacturado.toStringAsFixed(2)}');
 
     return buffer.toString();
   }
@@ -213,17 +213,17 @@ class _ReportesScreenState extends State<ReportesScreen> {
 
             if (porcentaje < 80) {
               estadoColor = greenSuccess;
-              estadoBadgeColor = greenSuccess.withOpacity(0.14);
+              estadoBadgeColor = greenSuccess.withValues(alpha: 0.14);
               estadoIcon = Icons.check_circle_rounded;
               estadoTexto = 'Te mantenés en tu Categoría';
             } else if (porcentaje < 100) {
               estadoColor = warningColor;
-              estadoBadgeColor = warningColor.withOpacity(0.14);
+              estadoBadgeColor = warningColor.withValues(alpha: 0.14);
               estadoIcon = Icons.warning_amber_rounded;
               estadoTexto = 'Atención: Cerca de recategorizar';
             } else {
               estadoColor = alertColor;
-              estadoBadgeColor = alertColor.withOpacity(0.14);
+              estadoBadgeColor = alertColor.withValues(alpha: 0.14);
               estadoIcon = Icons.error_rounded;
               estadoTexto = 'Alerta: Tope anual alcanzado / Riesgo de exclusión';
             }
@@ -258,23 +258,28 @@ class _ReportesScreenState extends State<ReportesScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text(
-                                'Semáforo de Recategorización Semestral (ARCA)',
-                                style: TextStyle(
-                                  color: textPrimary,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                              const Expanded(
+                                child: Text(
+                                  'Semáforo de Recategorización Semestral (ARCA)',
+                                  style: TextStyle(
+                                    color: textPrimary,
+                                    fontSize: 16.5,
+                                    fontWeight: FontWeight.bold,
+                                    height: 1.25,
+                                  ),
                                 ),
                               ),
+                              const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
                                   vertical: 6,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: estadoColor.withOpacity(0.15),
+                                  color: estadoColor.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(999),
                                 ),
                                 child: Text(
@@ -352,7 +357,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
                               color: estadoBadgeColor,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: estadoColor.withOpacity(0.4),
+                                color: estadoColor.withValues(alpha: 0.4),
                               ),
                             ),
                             child: Row(
@@ -378,32 +383,35 @@ class _ReportesScreenState extends State<ReportesScreen> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _MetricCard(
-                            title: 'Facturado',
-                            value: _formatCurrency(totalFacturado),
-                            accentColor: indigoAccent,
+                    IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: _MetricCard(
+                              title: 'Facturado',
+                              value: _formatCurrency(totalFacturado),
+                              accentColor: indigoAccent,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _MetricCard(
-                            title: 'Facturas',
-                            value: cantidadFacturas.toString(),
-                            accentColor: greenSuccess,
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _MetricCard(
+                              title: 'Facturas',
+                              value: cantidadFacturas.toString(),
+                              accentColor: greenSuccess,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _MetricCard(
-                            title: 'Promedio',
-                            value: _formatCurrency(promedio),
-                            accentColor: const Color(0xFF38BDF8),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _MetricCard(
+                              title: 'Promedio',
+                              value: _formatCurrency(promedio),
+                              accentColor: const Color(0xFF38BDF8),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
@@ -416,21 +424,11 @@ class _ReportesScreenState extends State<ReportesScreen> {
                             cantidadFacturas,
                           );
 
-                          final fileName = 'resumen_facturacion_argestion.csv';
-                          final blob = html.Blob([csv], 'text/csv;charset=utf-8');
-                          final url = html.Url.createObjectUrlFromBlob(blob);
-                          final anchor = html.AnchorElement(href: url)
-                            ..setAttribute('download', fileName)
-                            ..click();
-
-                          html.Url.revokeObjectUrl(url);
-                          anchor.remove();
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Archivo $fileName descargado con éxito'),
-                              backgroundColor: greenSuccess,
-                            ),
+                          const fileName = 'resumen_facturacion_argestion.csv';
+                          exportCsv(
+                            context: context,
+                            csvContent: csv,
+                            fileName: fileName,
                           );
                         },
                         style: ElevatedButton.styleFrom(
@@ -476,7 +474,7 @@ class _MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
         color: const Color(0xFF1E293B),
         borderRadius: BorderRadius.circular(16),
@@ -484,6 +482,7 @@ class _MetricCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(
             title,
@@ -493,12 +492,17 @@ class _MetricCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          Text(
-            value,
-            style: TextStyle(
-              color: accentColor,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: accentColor,
+                fontSize: 19,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
