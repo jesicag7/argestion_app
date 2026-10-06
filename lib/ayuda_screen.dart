@@ -21,21 +21,19 @@ class _ChatMessage {
 }
 
 class _AyudaScreenState extends State<AyudaScreen> {
-  static const String _apiKey = geminiApiKey;
-  static const String _backupApiKey = geminiBackupApiKey;
+  static const String _apiKey = groqApiKey;
+  static const String _backupApiKey = geminiApiKey;
 
   String _activeApiKey = _apiKey.isNotEmpty ? _apiKey : _backupApiKey;
 
   bool get _isKeyConfigured => _activeApiKey.trim().isNotEmpty;
 
-  // Modelos oficiales vigentes y compatibles
-  static const String _primaryModel = 'gemini-2.5-flash';
+  // Modelos oficiales vigentes y compatibles en Groq
+  static const String _primaryModel = 'llama-3.1-8b-instant';
   static const List<String> _compatibleModels = [
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-3.8-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-flash-latest',
+    'llama-3.1-8b-instant',
+    'llama-3.3-70b-versatile',
+    'llama-3.1-70b-versatile',
   ];
 
   String _modelName = _primaryModel;
@@ -226,13 +224,11 @@ Topes anuales que usa la app (referencia)
                 'como con dudas impositivas del Monotributo '
                 '(facturación, notas de crédito, recategorización y normativas de ARCA).\n\n'
                 'Podés elegir una pregunta frecuente o escribirme tu consulta abajo.'
-            : '⚠️ **API Key de Gemini no configurada**\n\n'
-                'Para habilitar el Asistente Inteligente, se debe proveer la clave mediante `--dart-define` al compilar o ejecutar la app:\n\n'
+            : '⚠️ **API Key de Groq no configurada**\n\n'
+                'Para habilitar el Asistente Inteligente con Llama 3, se debe proveer la clave mediante `--dart-define` al compilar o ejecutar la app:\n\n'
                 '```bash\n'
-                'flutter run --dart-define=GEMINI_API_KEY=tu_api_key\n'
-                '```\n\n'
-                'Opcionalmente también podés proveer una clave de respaldo:\n'
-                '`--dart-define=GEMINI_BACKUP_API_KEY=tu_backup_key`',
+                'flutter run --dart-define=GROQ_API_KEY=tu_api_key\n'
+                '```',
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -263,7 +259,7 @@ Topes anuales que usa la app (referencia)
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Se debe proveer la clave mediante --dart-define=GEMINI_API_KEY=tu_api_key',
+            'Se debe proveer la clave mediante --dart-define=GROQ_API_KEY=tu_api_key',
             style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Color(0xFFEF4444),
@@ -278,9 +274,9 @@ Topes anuales que usa la app (referencia)
         ));
         _messages.add(_ChatMessage(
           text:
-              '⚠️ **No se pudo enviar la consulta**: Falta configurar la API Key de Gemini.\n\n'
+              '⚠️ **No se pudo enviar la consulta**: Falta configurar la API Key de Groq.\n\n'
               'Se debe proveer la clave mediante `--dart-define`:\n\n'
-              '`flutter run --dart-define=GEMINI_API_KEY=tu_api_key`',
+              '`flutter run --dart-define=GROQ_API_KEY=tu_api_key`',
           isUser: false,
           timestamp: DateTime.now(),
         ));
@@ -318,7 +314,7 @@ Topes anuales que usa la app (referencia)
     for (int i = 0; i < candidateModels.length; i++) {
       final currentCandidate = candidateModels[i];
       try {
-        debugPrint('Consultando modelo $currentCandidate mediante GeminiService HTTP...');
+        debugPrint('Consultando modelo $currentCandidate mediante Groq Llama 3...');
         final serviceResponse = await GeminiService.sendMessage(
           prompt: text,
           model: currentCandidate,
@@ -362,19 +358,7 @@ Topes anuales que usa la app (referencia)
           continue;
         }
 
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Error al conectar con el Asistente: ${errorStr.split('\n').first}',
-              style: const TextStyle(color: Colors.white),
-            ),
-            backgroundColor: const Color(0xFFEF4444),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-        reply =
-            'Disculpá, ocurrió un problema al procesar tu consulta con Gemini. Por favor verificá tu conexión e intentá de nuevo.';
+        reply = GeminiService.responderFallbackLocal(text);
         break;
       }
     }
@@ -382,7 +366,7 @@ Topes anuales que usa la app (referencia)
     if (!mounted) return;
     setState(() {
       _messages.add(_ChatMessage(
-        text: reply ?? 'No pude generar una respuesta en este momento.',
+        text: reply ?? GeminiService.responderFallbackLocal(text),
         isUser: false,
         timestamp: DateTime.now(),
       ));
@@ -484,7 +468,7 @@ Topes anuales que usa la app (referencia)
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'API Key no detectada. Proveer mediante --dart-define=GEMINI_API_KEY=tu_clave',
+                      'API Key no detectada. Proveer mediante --dart-define=GROQ_API_KEY=tu_clave',
                       style: TextStyle(
                         color: Color(0xFFFDE68A),
                         fontSize: 12,
@@ -590,29 +574,41 @@ Topes anuales que usa la app (referencia)
                 runSpacing: 8,
                 alignment: WrapAlignment.start,
                 children: _sugerencias.map((sugerencia) {
-                  return ActionChip(
-                    backgroundColor: const Color(0xFF1E293B),
-                    elevation: 0,
-                    pressElevation: 1,
-                    side: const BorderSide(color: Color(0xFF334155)),
-                    shape: RoundedRectangleBorder(
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _isLoading ? null : () => _enviarMensaje(sugerencia),
                       borderRadius: BorderRadius.circular(20),
-                    ),
-                    avatar: const Icon(
-                      Icons.help_outline_rounded,
-                      size: 15,
-                      color: Color(0xFF818CF8),
-                    ),
-                    label: Text(
-                      sugerencia,
-                      style: const TextStyle(
-                        color: Color(0xFFE2E8F0),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E293B),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFF334155)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.help_outline_rounded,
+                              size: 15,
+                              color: Color(0xFF818CF8),
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                sugerencia,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    onPressed:
-                        _isLoading ? null : () => _enviarMensaje(sugerencia),
                   );
                 }).toList(),
               ),

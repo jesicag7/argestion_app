@@ -184,7 +184,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
                 const SizedBox(height: 16),
 
                 DropdownButtonFormField<String>(
-                  value: _categoriaSeleccionada,
+                  initialValue: _categoriaSeleccionada,
                   dropdownColor: const Color(0xFF1E293B),
                   style: const TextStyle(color: Colors.white, fontSize: 16),
                   decoration: _inputStyle('Categoría Monotributo', Icons.bar_chart_rounded),

@@ -38,28 +38,31 @@ class PagosScreen extends StatelessWidget {
         elevation: 0,
         automaticallyImplyLeading: false,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildTarjetaPrincipal(context),
-            const SizedBox(height: 16),
-            _buildAvisoDebitoAutomatico(),
-            const SizedBox(height: 24),
-            const Text(
-              'Historial de pagos',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+      body: SafeArea(
+        bottom: true,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 40),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildTarjetaPrincipal(context),
+              const SizedBox(height: 16),
+              _buildAvisoDebitoAutomatico(),
+              const SizedBox(height: 24),
+              const Text(
+                'Historial de pagos',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            _buildComprobante(periodo: 'Agosto 2026', monto: '\$ 78.500'),
-            const SizedBox(height: 10),
-            _buildComprobante(periodo: 'Julio 2026', monto: '\$ 78.500'),
-          ],
+              const SizedBox(height: 12),
+              _buildComprobante(periodo: 'Agosto 2026', monto: '\$ 78.500'),
+              const SizedBox(height: 10),
+              _buildComprobante(periodo: 'Julio 2026', monto: '\$ 78.500'),
+            ],
+          ),
         ),
       ),
     );
@@ -183,9 +186,14 @@ class PagosScreen extends StatelessWidget {
             children: [
               Icon(Icons.copy, size: 20),
               SizedBox(width: 8),
-              Text(
-                'Copiar Código de Pago / VEP',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Copiar Código de Pago / VEP',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                ),
               ),
             ],
           ),
@@ -218,9 +226,14 @@ class PagosScreen extends StatelessWidget {
             children: [
               Icon(Icons.payment, size: 20),
               SizedBox(width: 8),
-              Text(
-                'Pagar con Mercado Pago / Home Banking',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Pagar con MP / Home Banking',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                ),
               ),
             ],
           ),

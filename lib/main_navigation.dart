@@ -95,9 +95,10 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
           await collection.add(facturaData);
         }
 
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('¡Emitidas ${_listaFacturas.length} facturas con éxito!R'),
+            content: Text('¡Emitidas ${_listaFacturas.length} facturas con éxito!'),
             backgroundColor: const Color(0xFF10B981), // Verde éxito
           ),
         );
@@ -107,12 +108,14 @@ class _FacturacionScreenState extends State<FacturacionScreen> {
           _listaFacturas = [ItemFactura()]; 
         });
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al conectar con la base de datos: $e'),
-            backgroundColor: const Color(0xFFFF3366),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al conectar con la base de datos: $e'),
+              backgroundColor: const Color(0xFFFF3366),
+            ),
+          );
+        }
       } finally {
         setState(() => _isLoading = false);
       }
