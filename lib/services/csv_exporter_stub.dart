@@ -9,10 +9,10 @@ void exportCsv({
   showDialog(
     context: context,
     builder: (dialogCtx) => AlertDialog(
-      backgroundColor: const Color(0xFF1E293B),
+      backgroundColor: const Color(0xFFFFFFFF),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Color(0xFF334155)),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       title: const Row(
         children: [
@@ -21,7 +21,7 @@ void exportCsv({
           Text(
             'Resumen CSV',
             style: TextStyle(
-              color: Colors.white,
+              color: Color(0xFF0F172A),
               fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
@@ -35,7 +35,7 @@ void exportCsv({
           Text(
             'Archivo generado: $fileName',
             style: const TextStyle(
-              color: Color(0xFF94A3B8),
+              color: Color(0xFF64748B),
               fontSize: 13,
               fontWeight: FontWeight.w500,
             ),
@@ -45,15 +45,15 @@ void exportCsv({
             padding: const EdgeInsets.all(12),
             constraints: const BoxConstraints(maxHeight: 180),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
+              color: const Color(0xFFF8FAFC),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFF334155)),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
             child: SingleChildScrollView(
               child: Text(
                 csvContent,
                 style: const TextStyle(
-                  color: Colors.white70,
+                  color: Color(0xFF0F172A),
                   fontSize: 11,
                   fontFamily: 'monospace',
                 ),
@@ -80,15 +80,15 @@ void exportCsv({
               ),
             );
           },
-          icon: const Icon(Icons.copy_rounded, size: 18, color: Color(0xFF6366F1)),
+          icon: const Icon(Icons.copy_rounded, size: 18, color: Color(0xFF059669)),
           label: const Text(
             'Copiar al Portapapeles',
-            style: TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold),
+            style: TextStyle(color: Color(0xFF059669), fontWeight: FontWeight.bold),
           ),
         ),
         TextButton(
           onPressed: () => Navigator.of(dialogCtx).pop(),
-          child: const Text('Cerrar', style: TextStyle(color: Colors.white70)),
+          child: const Text('Cerrar', style: TextStyle(color: Color(0xFF64748B))),
         ),
       ],
     ),
@@ -102,4 +102,3 @@ void exportCsv({
     ),
   );
 }
-

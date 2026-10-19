@@ -87,9 +87,12 @@ SECCIONES DE LA APLICACIÓN ARGestion (pestañas inferiores)
 3) PAGOS: pantalla "Estado de Cuenta y Vencimientos".
 - La **cuota integrada** del monotributo vence el **día 20 de cada mes**. Si cae en fin de semana o
   feriado, se corre al próximo día hábil.
-- Botón **"Copiar Código de Pago / VEP"**: el **VEP (Pago Electrónico Virtual)** es el código de pago
-  que emite ARCA para abonar la cuota desde home banking, Mercado Pago o PagoMisCuentas sin tener
-  que cargar los datos del comprobante a mano. Tocá el botón y pegalo en la app de pagos de tu banco.
+- Botón **"Copiar Código de Pago / VEP"**: copia una referencia con tu CUIT y el período seleccionado;
+  **no es un VEP oficial ni se puede usar directamente para pagar**. Para pagar, generá el VEP desde
+  el servicio Monotributo de ARCA y luego elegí Mercado Pago o tu home banking.
+- La cuota que muestra la pantalla es una estimación para servicios con valores publicados por ARCA
+  desde agosto de 2026. El importe final puede variar según tu situación fiscal; verificá el monto
+  y la categoría en el portal de ARCA (arca.gob.ar/monotributo/categorias.asp).
 - Si estás adherido al **débito automático**, el cobro se hace solo en la cuenta registrada.
 - También muestra el estado del período (amarillo = pendiente) y el "Historial de pagos", donde
   verde significa pagado.
@@ -219,16 +222,16 @@ Topes anuales que usa la app (referencia)
       _ChatMessage(
         text: _isKeyConfigured
             ? '¡Hola! 👋 Soy Lionel, tu asistente de ARGestion.\n\n'
-                'Te ayudo tanto con el manejo de la app '
-                '(semáforo fiscal, factura express, pagos y reportes) '
-                'como con dudas impositivas del Monotributo '
-                '(facturación, notas de crédito, recategorización y normativas de ARCA).\n\n'
-                'Podés elegir una pregunta frecuente o escribirme tu consulta abajo.'
+                  'Te ayudo tanto con el manejo de la app '
+                  '(semáforo fiscal, factura express, pagos y reportes) '
+                  'como con dudas impositivas del Monotributo '
+                  '(facturación, notas de crédito, recategorización y normativas de ARCA).\n\n'
+                  'Podés elegir una pregunta frecuente o escribirme tu consulta abajo.'
             : '⚠️ **API Key de Groq no configurada**\n\n'
-                'Para habilitar el Asistente Inteligente con Llama 3, se debe proveer la clave mediante `--dart-define` al compilar o ejecutar la app:\n\n'
-                '```bash\n'
-                'flutter run --dart-define=GROQ_API_KEY=tu_api_key\n'
-                '```',
+                  'Para habilitar el Asistente Inteligente con Llama 3, se debe proveer la clave mediante `--dart-define` al compilar o ejecutar la app:\n\n'
+                  '```bash\n'
+                  'flutter run --dart-define=GROQ_API_KEY=tu_api_key\n'
+                  '```',
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -267,30 +270,28 @@ Topes anuales que usa la app (referencia)
         ),
       );
       setState(() {
-        _messages.add(_ChatMessage(
-          text: text,
-          isUser: true,
-          timestamp: DateTime.now(),
-        ));
-        _messages.add(_ChatMessage(
-          text:
-              '⚠️ **No se pudo enviar la consulta**: Falta configurar la API Key de Groq.\n\n'
-              'Se debe proveer la clave mediante `--dart-define`:\n\n'
-              '`flutter run --dart-define=GROQ_API_KEY=tu_api_key`',
-          isUser: false,
-          timestamp: DateTime.now(),
-        ));
+        _messages.add(
+          _ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
+        );
+        _messages.add(
+          _ChatMessage(
+            text:
+                '⚠️ **No se pudo enviar la consulta**: Falta configurar la API Key de Groq.\n\n'
+                'Se debe proveer la clave mediante `--dart-define`:\n\n'
+                '`flutter run --dart-define=GROQ_API_KEY=tu_api_key`',
+            isUser: false,
+            timestamp: DateTime.now(),
+          ),
+        );
       });
       _scrollToBottom();
       return;
     }
 
     setState(() {
-      _messages.add(_ChatMessage(
-        text: text,
-        isUser: true,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(
+        _ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
+      );
       _isLoading = true;
     });
     _scrollToBottom();
@@ -305,16 +306,15 @@ Topes anuales que usa la app (referencia)
 
     final history = _messages
         .where((m) => m.text.isNotEmpty)
-        .map((m) => {
-              'role': m.isUser ? 'user' : 'model',
-              'text': m.text,
-            })
+        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
         .toList();
 
     for (int i = 0; i < candidateModels.length; i++) {
       final currentCandidate = candidateModels[i];
       try {
-        debugPrint('Consultando modelo $currentCandidate mediante Groq Llama 3...');
+        debugPrint(
+          'Consultando modelo $currentCandidate mediante Groq Llama 3...',
+        );
         final serviceResponse = await GeminiService.sendMessage(
           prompt: text,
           model: currentCandidate,
@@ -333,20 +333,24 @@ Topes anuales que usa la app (referencia)
 
         final errorStr = e.toString();
 
-        final isAuthError = errorStr.contains('401') ||
+        final isAuthError =
+            errorStr.contains('401') ||
             errorStr.contains('UNAUTHENTICATED') ||
             errorStr.contains('API_KEY_SERVICE_BLOCKED') ||
             errorStr.contains('invalid authentication credentials');
 
         // Si la clave primaria falla por 401 y disponemos de clave de respaldo, cambiamos y reintentamos
-        if (isAuthError && _backupApiKey.isNotEmpty && _activeApiKey != _backupApiKey) {
+        if (isAuthError &&
+            _backupApiKey.isNotEmpty &&
+            _activeApiKey != _backupApiKey) {
           debugPrint('>>> Reintentando con API Key de respaldo...');
           _activeApiKey = _backupApiKey;
           i--;
           continue;
         }
 
-        final isNotFound = errorStr.contains('404') ||
+        final isNotFound =
+            errorStr.contains('404') ||
             errorStr.contains('503') ||
             errorStr.contains('NOT_FOUND') ||
             errorStr.contains('not found') ||
@@ -365,11 +369,13 @@ Topes anuales que usa la app (referencia)
 
     if (!mounted) return;
     setState(() {
-      _messages.add(_ChatMessage(
-        text: reply ?? GeminiService.responderFallbackLocal(text),
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(
+        _ChatMessage(
+          text: reply ?? GeminiService.responderFallbackLocal(text),
+          isUser: false,
+          timestamp: DateTime.now(),
+        ),
+      );
       _isLoading = false;
     });
     _scrollToBottom();
@@ -377,9 +383,9 @@ Topes anuales que usa la app (referencia)
 
   @override
   Widget build(BuildContext context) {
-    const darkBackground = Color(0xFF0F172A);
-    const darkCard = Color(0xFF1E293B);
-    const darkBorder = Color(0xFF334155);
+    const darkBackground = Colors.transparent;
+    const darkCard = Color(0xFFFFFFFF);
+    const darkBorder = Color(0xFFE2E8F0);
     const greenOnline = Color(0xFF10B981);
 
     return Scaffold(
@@ -399,7 +405,7 @@ Topes anuales que usa la app (referencia)
                 const Text(
                   'Lionel',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF0F172A),
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
@@ -411,7 +417,9 @@ Topes anuales que usa la app (referencia)
                       width: 7,
                       height: 7,
                       decoration: BoxDecoration(
-                        color: _isKeyConfigured ? greenOnline : const Color(0xFFF59E0B),
+                        color: _isKeyConfigured
+                            ? greenOnline
+                            : const Color(0xFFF59E0B),
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -419,7 +427,9 @@ Topes anuales que usa la app (referencia)
                     Text(
                       _isKeyConfigured ? 'En línea' : 'Sin API Key',
                       style: TextStyle(
-                        color: _isKeyConfigured ? greenOnline : const Color(0xFFF59E0B),
+                        color: _isKeyConfigured
+                            ? greenOnline
+                            : const Color(0xFFF59E0B),
                         fontSize: 11.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -432,7 +442,7 @@ Topes anuales que usa la app (referencia)
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF94A3B8)),
+            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B)),
             tooltip: 'Reiniciar conversación',
             onPressed: () {
               setState(() {
@@ -463,14 +473,17 @@ Topes anuales que usa la app (referencia)
               color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
               child: const Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded,
-                      color: Color(0xFFF59E0B), size: 18),
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: Color(0xFFF59E0B),
+                    size: 18,
+                  ),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'API Key no detectada. Proveer mediante --dart-define=GROQ_API_KEY=tu_clave',
                       style: TextStyle(
-                        color: Color(0xFFFDE68A),
+                        color: Color(0xFF92400E),
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
@@ -518,16 +531,16 @@ Topes anuales que usa la app (referencia)
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: const LinearGradient(
-          colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
+          colors: [Color(0xFF047857), Color(0xFF059669), Color(0xFF10B981)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         border: Border.all(
-          color: const Color(0xFF818CF8).withValues(alpha: 0.6),
+          color: const Color(0xFF059669).withValues(alpha: 0.35),
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6366F1).withValues(alpha: 0.35),
+            color: const Color(0xFF059669).withValues(alpha: 0.35),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -546,10 +559,8 @@ Topes anuales que usa la app (referencia)
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
       decoration: const BoxDecoration(
-        color: Color(0xFF141F36),
-        border: Border(
-          bottom: BorderSide(color: Color(0xFF334155)),
-        ),
+        color: Color(0xFFF8FAFC),
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 230),
@@ -563,7 +574,7 @@ Topes anuales que usa la app (referencia)
                 child: Text(
                   '💡 Preguntas frecuentes:',
                   style: TextStyle(
-                    color: Color(0xFF94A3B8),
+                    color: Color(0xFF64748B),
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
@@ -577,14 +588,19 @@ Topes anuales que usa la app (referencia)
                   return Material(
                     color: Colors.transparent,
                     child: InkWell(
-                      onTap: _isLoading ? null : () => _enviarMensaje(sugerencia),
+                      onTap: _isLoading
+                          ? null
+                          : () => _enviarMensaje(sugerencia),
                       borderRadius: BorderRadius.circular(20),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1E293B),
+                          color: const Color(0xFFFFFFFF),
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFF334155)),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -592,14 +608,14 @@ Topes anuales que usa la app (referencia)
                             const Icon(
                               Icons.help_outline_rounded,
                               size: 15,
-                              color: Color(0xFF818CF8),
+                              color: Color(0xFF059669),
                             ),
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
                                 sugerencia,
                                 style: const TextStyle(
-                                  color: Colors.white,
+                                  color: Color(0xFF0F172A),
                                   fontSize: 12,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -627,8 +643,9 @@ Topes anuales que usa la app (referencia)
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
-        mainAxisAlignment:
-            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isUser) ...[
@@ -643,12 +660,12 @@ Topes anuales que usa la app (referencia)
               decoration: BoxDecoration(
                 gradient: isUser
                     ? const LinearGradient(
-                        colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
+                        colors: [Color(0xFF064E3B), Color(0xFF059669)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       )
                     : null,
-                color: isUser ? null : const Color(0xFF1E293B),
+                color: isUser ? null : const Color(0xFFFFFFFF),
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(16),
                   topRight: const Radius.circular(16),
@@ -657,20 +674,24 @@ Topes anuales que usa la app (referencia)
                 ),
                 border: isUser
                     ? null
-                    : Border.all(color: const Color(0xFF334155)),
+                    : Border.all(color: const Color(0xFFE2E8F0)),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    offset: const Offset(0, 2),
-                    blurRadius: 4,
+                    color: Colors.black.withValues(alpha: 0.04),
+                    offset: const Offset(0, 4),
+                    blurRadius: 10,
                   ),
                 ],
               ),
               child: Column(
-                crossAxisAlignment:
-                    isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                crossAxisAlignment: isUser
+                    ? CrossAxisAlignment.end
+                    : CrossAxisAlignment.start,
                 children: [
-                  _buildFormattedText(message.text, Colors.white),
+                  _buildFormattedText(
+                    message.text,
+                    isUser ? Colors.white : const Color(0xFF0F172A),
+                  ),
                   const SizedBox(height: 5),
                   Text(
                     hora,
@@ -701,28 +722,34 @@ Topes anuales que usa la app (referencia)
 
       for (final match in boldRegex.allMatches(line)) {
         if (match.start > lastMatchEnd) {
-          spans.add(TextSpan(
-            text: line.substring(lastMatchEnd, match.start),
-            style: TextStyle(color: textColor, fontSize: 14, height: 1.45),
-          ));
+          spans.add(
+            TextSpan(
+              text: line.substring(lastMatchEnd, match.start),
+              style: TextStyle(color: textColor, fontSize: 14, height: 1.45),
+            ),
+          );
         }
-        spans.add(TextSpan(
-          text: match.group(1),
-          style: TextStyle(
-            color: textColor,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            height: 1.45,
+        spans.add(
+          TextSpan(
+            text: match.group(1),
+            style: TextStyle(
+              color: textColor,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              height: 1.45,
+            ),
           ),
-        ));
+        );
         lastMatchEnd = match.end;
       }
 
       if (lastMatchEnd < line.length) {
-        spans.add(TextSpan(
-          text: line.substring(lastMatchEnd),
-          style: TextStyle(color: textColor, fontSize: 14, height: 1.45),
-        ));
+        spans.add(
+          TextSpan(
+            text: line.substring(lastMatchEnd),
+            style: TextStyle(color: textColor, fontSize: 14, height: 1.45),
+          ),
+        );
       }
 
       if (i < lines.length - 1) {
@@ -730,9 +757,7 @@ Topes anuales que usa la app (referencia)
       }
     }
 
-    return SelectableText.rich(
-      TextSpan(children: spans),
-    );
+    return SelectableText.rich(TextSpan(children: spans));
   }
 
   Widget _buildTypingIndicator() {
@@ -743,9 +768,9 @@ Topes anuales que usa la app (referencia)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
+              color: const Color(0xFFFFFFFF),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF334155)),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -762,7 +787,7 @@ Topes anuales que usa la app (referencia)
                 Text(
                   'El asistente está escribiendo...',
                   style: TextStyle(
-                    color: Color(0xFF94A3B8),
+                    color: Color(0xFF64748B),
                     fontSize: 12.5,
                     fontStyle: FontStyle.italic,
                   ),
@@ -779,10 +804,8 @@ Topes anuales que usa la app (referencia)
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: const BoxDecoration(
-        color: Color(0xFF1E293B),
-        border: Border(
-          top: BorderSide(color: Color(0xFF334155)),
-        ),
+        color: Color(0xFFFFFFFF),
+        border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
       ),
       child: SafeArea(
         top: false,
@@ -791,14 +814,17 @@ Topes anuales que usa la app (referencia)
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A),
+                  color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0xFF334155)),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: TextField(
                   controller: _textController,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: const TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontSize: 14,
+                  ),
                   minLines: 1,
                   maxLines: 4,
                   textCapitalization: TextCapitalization.sentences,
@@ -820,9 +846,9 @@ Topes anuales que usa la app (referencia)
                 gradient: _isLoading
                     ? null
                     : const LinearGradient(
-                        colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
+                        colors: [Color(0xFF064E3B), Color(0xFF059669)],
                       ),
-                color: _isLoading ? const Color(0xFF334155) : null,
+                color: _isLoading ? const Color(0xFFE2E8F0) : null,
                 shape: BoxShape.circle,
               ),
               child: IconButton(

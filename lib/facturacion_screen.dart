@@ -14,8 +14,6 @@ class FacturaExpressScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return NuevaFacturaScreen(
-      onVolverAlInicio: onVolverAlInicio,
-    );
+    return NuevaFacturaScreen(onVolverAlInicio: onVolverAlInicio);
   }
 }

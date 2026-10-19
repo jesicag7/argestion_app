@@ -8,18 +8,21 @@ class PdfInvoiceService {
   /// Genera y comparte el comprobante fiscal en formato PDF estilo oficial AFIP/ARCA
   static Future<void> shareInvoicePdf(Map<String, dynamic> data) async {
     final pdfBytes = await generateInvoicePdf(data);
-    final nro = (data['nro_factura'] ?? 'comprobante').toString().replaceAll('/', '-');
-    final fileName = 'Factura_$nro.pdf';
-    await Printing.sharePdf(
-      bytes: pdfBytes,
-      filename: fileName,
+    final nro = (data['nro_factura'] ?? 'comprobante').toString().replaceAll(
+      '/',
+      '-',
     );
+    final fileName = 'Factura_$nro.pdf';
+    await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
   }
 
   /// Imprime o abre la vista previa nativa del PDF
   static Future<void> printInvoicePdf(Map<String, dynamic> data) async {
     final pdfBytes = await generateInvoicePdf(data);
-    final nro = (data['nro_factura'] ?? 'comprobante').toString().replaceAll('/', '-');
+    final nro = (data['nro_factura'] ?? 'comprobante').toString().replaceAll(
+      '/',
+      '-',
+    );
     await Printing.layoutPdf(
       name: 'Factura_$nro.pdf',
       onLayout: (PdfPageFormat format) async => pdfBytes,
@@ -28,11 +31,51 @@ class PdfInvoiceService {
 
   /// Construye el documento PDF con formato oficial de Comprobante Electrónico AFIP / ARCA
   static Future<Uint8List> generateInvoicePdf(Map<String, dynamic> data) async {
+    final cae = (data['cae'] ?? '').toString().trim();
+    final resultado =
+        (data['resultadoEmision'] ?? data['resultado_emision'] ?? '')
+            .toString()
+            .toLowerCase();
+    final modoHomologacion = data['modoHomologacion'] == true;
+    final qrContent =
+        (data['qrUrl'] ?? data['qr_url'] ?? data['qrData'] ?? data['qr_data'])
+            ?.toString();
+    final vtoCae = _parseDate(data['fechaVtoCae'] ?? data['vto_cae']);
+    if (resultado != 'aprobado' ||
+        modoHomologacion ||
+        cae.length != 14 ||
+        vtoCae == null ||
+        qrContent == null ||
+        qrContent.isEmpty) {
+      throw StateError(
+        modoHomologacion
+            ? 'No se puede generar un comprobante fiscal oficial en modo '
+                  'homologación.'
+            : 'No se puede generar el comprobante: falta una autorización '
+                  'real de ARCA con CAE, vencimiento y QR.',
+      );
+    }
+
     final pdf = pw.Document();
 
-    final tipoComprobante = (data['tipo_comprobante'] ?? 'Factura C').toString();
+    final tipoComprobante = (data['tipo_comprobante'] ?? 'Factura C')
+        .toString();
     final letraComprobante = _obtenerLetra(tipoComprobante);
     final codigoComprobante = _obtenerCodigoAfip(tipoComprobante);
+    final esNotaCredito =
+        data['esNotaCredito'] == true ||
+        data['es_nota_credito'] == true ||
+        tipoComprobante.startsWith('Nota de Crédito');
+    final comprobanteAsociadoTipo =
+        (data['comprobanteAsociadoTipo'] ??
+                data['comprobante_asociado_tipo'] ??
+                'Factura C')
+            .toString();
+    final comprobanteAsociadoNumero =
+        (data['comprobanteAsociadoNumero'] ??
+                data['comprobante_asociado_numero'] ??
+                '')
+            .toString();
 
     final nroFactura = (data['nro_factura'] ?? '0001-00000001').toString();
     final fechaEmisionStr = _formatearFecha(data['fecha_emision']);
@@ -44,29 +87,43 @@ class PdfInvoiceService {
     final vtoPagoStr = _formatearFecha(data['vencimiento_pago']);
 
     // Emisor
-    final emisorNombre = (data['emisor_nombre'] ?? 'ARGestión Usuario').toString();
-    final emisorCuit = (data['emisor_cuit'] ?? '20-38491823-4').toString();
-    final emisorDomicilio = (data['emisor_domicilio'] ?? 'Buenos Aires, Argentina').toString();
+    final emisorNombre = (data['emisor_nombre'] ?? 'ARGestión Usuario')
+        .toString();
+    final emisorCuit = (data['emisor_cuit'] ?? '').toString();
+    final emisorDomicilio =
+        (data['emisor_domicilio'] ?? 'Buenos Aires, Argentina').toString();
 
     // Receptor / Cliente
-    final nombreCliente = (data['nombre_cliente'] ?? data['nombreCliente'] ?? 'Consumidor Final').toString();
-    final docCliente = (data['cuit_cliente'] ?? data['cuitCliente'] ?? 'Sin identificar').toString();
+    final nombreCliente =
+        (data['nombre_cliente'] ?? data['nombreCliente'] ?? 'Consumidor Final')
+            .toString();
+    final docCliente =
+        (data['cuit_cliente'] ?? data['cuitCliente'] ?? 'Sin identificar')
+            .toString();
     final tipoDocCliente = (data['tipo_documento_cliente'] ?? 'DNI').toString();
-    final condicionIva = (data['condicion_iva_cliente'] ?? 'Consumidor Final').toString();
+    final condicionIva = (data['condicion_iva_cliente'] ?? 'Consumidor Final')
+        .toString();
     final domicilioCliente = (data['domicilio_cliente'] ?? '-').toString();
-    final condicionVenta = (data['condicion_venta'] ?? 'Transferencia / Débito').toString();
+    final condicionVenta = (data['condicion_venta'] ?? 'Transferencia / Débito')
+        .toString();
 
     // Detalle
-    final descripcionItem = (data['descripcion_item'] ?? data['descripcion'] ?? 'Servicios Profesionales').toString();
+    final descripcionItem =
+        (data['descripcion_item'] ??
+                data['descripcion'] ??
+                'Servicios Profesionales')
+            .toString();
     final double monto = (data['monto'] is num)
         ? (data['monto'] as num).toDouble()
         : double.tryParse(data['monto']?.toString() ?? '0') ?? 0.0;
 
-    // CAE
-    final cae = (data['cae'] ?? '74291840291842').toString();
-    final vtoCaeStr = _formatearFecha(data['vto_cae'] ?? DateTime.now().add(const Duration(days: 10)).toIso8601String());
+    final vtoCaeStr = _formatearFecha(vtoCae);
 
-    final currencyFormat = NumberFormat.currency(locale: 'es_AR', symbol: '\$ ', decimalDigits: 2);
+    final currencyFormat = NumberFormat.currency(
+      locale: 'es_AR',
+      symbol: '\$ ',
+      decimalDigits: 2,
+    );
 
     pdf.addPage(
       pw.Page(
@@ -102,14 +159,25 @@ class PdfInvoiceService {
                             children: [
                               pw.Text(
                                 emisorNombre.toUpperCase(),
-                                style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+                                style: pw.TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
                                 maxLines: 2,
                               ),
                               pw.SizedBox(height: 3),
-                              pw.Text('Razón Social: $emisorNombre', style: const pw.TextStyle(fontSize: 8)),
-                              pw.Text('Domicilio Comercial: $emisorDomicilio', style: const pw.TextStyle(fontSize: 8)),
-                              pw.Text('Condición frente al IVA: Responsable Monotributo',
-                                  style: const pw.TextStyle(fontSize: 8)),
+                              pw.Text(
+                                'Razón Social: $emisorNombre',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
+                              pw.Text(
+                                'Domicilio Comercial: $emisorDomicilio',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
+                              pw.Text(
+                                'Condición frente al IVA: Responsable Monotributo',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
                             ],
                           ),
                         ),
@@ -121,7 +189,10 @@ class PdfInvoiceService {
                           width: 44,
                           height: 48,
                           decoration: pw.BoxDecoration(
-                            border: pw.Border.all(color: PdfColors.black, width: 1),
+                            border: pw.Border.all(
+                              color: PdfColors.black,
+                              width: 1,
+                            ),
                             color: PdfColors.white,
                           ),
                           child: pw.Column(
@@ -129,7 +200,10 @@ class PdfInvoiceService {
                             children: [
                               pw.Text(
                                 letraComprobante,
-                                style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold),
+                                style: pw.TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
                               ),
                               pw.Text(
                                 'COD. $codigoComprobante',
@@ -150,15 +224,35 @@ class PdfInvoiceService {
                             children: [
                               pw.Text(
                                 tipoComprobante.toUpperCase(),
-                                style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+                                style: pw.TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
                               ),
                               pw.SizedBox(height: 3),
-                              pw.Text('Punto de Venta - Comp. Nro: $nroFactura',
-                                  style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                              pw.Text('Fecha de Emisión: $fechaEmisionStr', style: const pw.TextStyle(fontSize: 8)),
-                              pw.Text('CUIT: $emisorCuit', style: const pw.TextStyle(fontSize: 8)),
-                              pw.Text('Ingresos Brutos: $emisorCuit', style: const pw.TextStyle(fontSize: 8)),
-                              pw.Text('Fecha Inicio de Actividades: 01/01/2024', style: const pw.TextStyle(fontSize: 8)),
+                              pw.Text(
+                                'Punto de Venta - Comp. Nro: $nroFactura',
+                                style: pw.TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                              pw.Text(
+                                'Fecha de Emisión: $fechaEmisionStr',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
+                              pw.Text(
+                                'CUIT: $emisorCuit',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
+                              pw.Text(
+                                'Ingresos Brutos: $emisorCuit',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
+                              pw.Text(
+                                'Fecha Inicio de Actividades: 01/01/2024',
+                                style: const pw.TextStyle(fontSize: 8),
+                              ),
                             ],
                           ),
                         ),
@@ -167,22 +261,57 @@ class PdfInvoiceService {
                   ),
                 ),
 
-                // 2. PERÍODO FACTURADO (SI CORRESPONDE)
-                if (concepto.contains('Servicio') || concepto == 'Productos y Servicios') ...[
+                if (esNotaCredito && comprobanteAsociadoNumero.isNotEmpty)
                   pw.Container(
-                    padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                    width: double.infinity,
+                    padding: const pw.EdgeInsets.symmetric(
+                      vertical: 5,
+                      horizontal: 2,
+                    ),
+                    child: pw.Text(
+                      'Comprobante Asociado: $comprobanteAsociadoTipo '
+                      '$comprobanteAsociadoNumero',
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ),
+
+                // 2. PERÍODO FACTURADO (SI CORRESPONDE)
+                if (concepto.contains('Servicio') ||
+                    concepto == 'Productos y Servicios') ...[
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(
+                      vertical: 4,
+                      horizontal: 2,
+                    ),
                     decoration: const pw.BoxDecoration(
                       border: pw.Border(
-                        bottom: pw.BorderSide(color: PdfColors.black, width: 0.5),
+                        bottom: pw.BorderSide(
+                          color: PdfColors.black,
+                          width: 0.5,
+                        ),
                       ),
                     ),
                     child: pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                       children: [
-                        pw.Text('Período Facturado Desde: $periodoDesdeStr', style: const pw.TextStyle(fontSize: 8)),
-                        pw.Text('Hasta: $periodoHastaStr', style: const pw.TextStyle(fontSize: 8)),
-                        pw.Text('Vencimiento para el Pago: $vtoPagoStr',
-                            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                        pw.Text(
+                          'Período Facturado Desde: $periodoDesdeStr',
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
+                        pw.Text(
+                          'Hasta: $periodoHastaStr',
+                          style: const pw.TextStyle(fontSize: 8),
+                        ),
+                        pw.Text(
+                          'Vencimiento para el Pago: $vtoPagoStr',
+                          style: pw.TextStyle(
+                            fontSize: 8,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -202,22 +331,41 @@ class PdfInvoiceService {
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          pw.Text('$tipoDocCliente: $docCliente',
-                              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                          pw.Text('Apellido y Nombre / Razón Social: $nombreCliente',
-                              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                          pw.Text(
+                            '$tipoDocCliente: $docCliente',
+                            style: pw.TextStyle(
+                              fontSize: 9,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.Text(
+                            'Apellido y Nombre / Razón Social: $nombreCliente',
+                            style: pw.TextStyle(
+                              fontSize: 9,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                       pw.SizedBox(height: 3),
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          pw.Text('Condición frente al IVA: $condicionIva', style: const pw.TextStyle(fontSize: 8.5)),
-                          pw.Text('Domicilio Comercial: $domicilioCliente', style: const pw.TextStyle(fontSize: 8.5)),
+                          pw.Text(
+                            'Condición frente al IVA: $condicionIva',
+                            style: const pw.TextStyle(fontSize: 8.5),
+                          ),
+                          pw.Text(
+                            'Domicilio Comercial: $domicilioCliente',
+                            style: const pw.TextStyle(fontSize: 8.5),
+                          ),
                         ],
                       ),
                       pw.SizedBox(height: 3),
-                      pw.Text('Condición de venta: $condicionVenta', style: const pw.TextStyle(fontSize: 8.5)),
+                      pw.Text(
+                        'Condición de venta: $condicionVenta',
+                        style: const pw.TextStyle(fontSize: 8.5),
+                      ),
                     ],
                   ),
                 ),
@@ -226,14 +374,22 @@ class PdfInvoiceService {
 
                 // 4. TABLA DE ÍTEMS / DETALLE DE FACTURACIÓN
                 pw.Table(
-                  border: pw.TableBorder.all(color: PdfColors.black, width: 0.5),
+                  border: pw.TableBorder.all(
+                    color: PdfColors.black,
+                    width: 0.5,
+                  ),
                   children: [
                     // Header de la tabla
                     pw.TableRow(
-                      decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.grey200,
+                      ),
                       children: [
                         _buildTableHeaderCell('Código', width: 45),
-                        _buildTableHeaderCell('Producto / Servicio', width: 230),
+                        _buildTableHeaderCell(
+                          'Producto / Servicio',
+                          width: 230,
+                        ),
                         _buildTableHeaderCell('Cantidad', width: 45),
                         _buildTableHeaderCell('U. Medida', width: 45),
                         _buildTableHeaderCell('Precio Unit.', width: 65),
@@ -247,8 +403,15 @@ class PdfInvoiceService {
                         _buildTableCell(descripcionItem),
                         _buildTableCell('1', align: pw.TextAlign.center),
                         _buildTableCell('otras', align: pw.TextAlign.center),
-                        _buildTableCell(currencyFormat.format(monto), align: pw.TextAlign.right),
-                        _buildTableCell(currencyFormat.format(monto), align: pw.TextAlign.right, isBold: true),
+                        _buildTableCell(
+                          currencyFormat.format(monto),
+                          align: pw.TextAlign.right,
+                        ),
+                        _buildTableCell(
+                          currencyFormat.format(monto),
+                          align: pw.TextAlign.right,
+                          isBold: true,
+                        ),
                       ],
                     ),
                   ],
@@ -268,12 +431,21 @@ class PdfInvoiceService {
                       pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.end,
                         children: [
-                          pw.Text('Subtotal: ${currencyFormat.format(monto)}', style: const pw.TextStyle(fontSize: 9)),
-                          pw.Text('Importe Otros Tributos: \$ 0,00', style: const pw.TextStyle(fontSize: 8)),
+                          pw.Text(
+                            'Subtotal: ${currencyFormat.format(monto)}',
+                            style: const pw.TextStyle(fontSize: 9),
+                          ),
+                          pw.Text(
+                            'Importe Otros Tributos: \$ 0,00',
+                            style: const pw.TextStyle(fontSize: 8),
+                          ),
                           pw.SizedBox(height: 2),
                           pw.Text(
                             'Importe Total: ${currencyFormat.format(monto)}',
-                            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                            style: pw.TextStyle(
+                              fontSize: 12,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
                           ),
                         ],
                       ),
@@ -294,18 +466,31 @@ class PdfInvoiceService {
                   child: pw.Row(
                     crossAxisAlignment: pw.CrossAxisAlignment.center,
                     children: [
+                      pw.BarcodeWidget(
+                        barcode: pw.Barcode.qrCode(),
+                        data: qrContent,
+                        width: 72,
+                        height: 72,
+                      ),
+                      pw.SizedBox(width: 10),
                       pw.Expanded(
                         child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
                             pw.Text(
                               'ARCA / AFIP - Comprobante Autorizado Electrónicamente',
-                              style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+                              style: pw.TextStyle(
+                                fontSize: 8.5,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
                             ),
                             pw.SizedBox(height: 2),
                             pw.Text(
                               'Esta Administración Federal de Ingresos Públicos no se responsabiliza por los datos consignados.',
-                              style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey700),
+                              style: const pw.TextStyle(
+                                fontSize: 6.5,
+                                color: PdfColors.grey700,
+                              ),
                             ),
                           ],
                         ),
@@ -316,15 +501,33 @@ class PdfInvoiceService {
                         children: [
                           pw.Row(
                             children: [
-                              pw.Text('CAE N°: ', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                              pw.Text(cae, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                              pw.Text(
+                                'CAE N°: ',
+                                style: pw.TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                              pw.Text(
+                                cae,
+                                style: pw.TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
                             ],
                           ),
                           pw.SizedBox(height: 2),
                           pw.Row(
                             children: [
-                              pw.Text('Fecha de Vto. de CAE: ', style: const pw.TextStyle(fontSize: 8.5)),
-                              pw.Text(vtoCaeStr, style: const pw.TextStyle(fontSize: 8.5)),
+                              pw.Text(
+                                'Fecha de Vto. de CAE: ',
+                                style: const pw.TextStyle(fontSize: 8.5),
+                              ),
+                              pw.Text(
+                                vtoCaeStr,
+                                style: const pw.TextStyle(fontSize: 8.5),
+                              ),
                             ],
                           ),
                         ],
@@ -406,5 +609,11 @@ class PdfInvoiceService {
     } catch (_) {
       return fecha.toString();
     }
+  }
+
+  static DateTime? _parseDate(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is String) return DateTime.tryParse(value);
+    return null;
   }
 }

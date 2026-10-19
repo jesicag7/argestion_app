@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'login_screen.dart';
+import 'models/monotributo_category.dart';
 
 class DashboardScreen extends StatelessWidget {
   final VoidCallback? onNuevaFacturaPressed;
@@ -14,22 +15,30 @@ class DashboardScreen extends StatelessWidget {
     this.onVerHistorialPressed,
   });
 
-  // Topes anuales de facturación por categoría de monotributo general (AFIP 2026)
-  static const Map<String, double> _topesMonotributo = {
-    'A': 7720000,
-    'B': 11450000,
-    'C': 16050000,
-    'D': 19950000,
-    'E': 23500000,
-    'F': 29400000,
-    'G': 35250000,
-    'H': 53400000,
-    'I': 59850000,
-    'J': 68600000,
-    'K': 82300000,
-  };
+  String _resolverNombre({
+    String? nombreFirestore,
+    String? nombreAuth,
+    String? correo,
+  }) {
+    for (final nombre in [nombreFirestore, nombreAuth]) {
+      final nombreLimpio = nombre?.trim();
+      if (nombreLimpio != null &&
+          nombreLimpio.isNotEmpty &&
+          nombreLimpio.toLowerCase() != 'usuario') {
+        return nombreLimpio;
+      }
+    }
 
-  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+    final correoLimpio = correo?.trim();
+    final separadorCorreo = correoLimpio?.indexOf('@') ?? -1;
+    if (correoLimpio != null && separadorCorreo > 0) {
+      final prefijoCorreo = correoLimpio.substring(0, separadorCorreo).trim();
+      if (prefijoCorreo.isEmpty) return 'Usuario';
+      return '${prefijoCorreo[0].toUpperCase()}${prefijoCorreo.substring(1)}';
+    }
+
+    return 'Usuario';
+  }
 
   String _normalizarCategoria(String? valor) {
     if (valor == null || valor.trim().isEmpty) return 'A';
@@ -47,7 +56,10 @@ class DashboardScreen extends StatelessWidget {
     return null;
   }
 
-  double _sumarUltimos12Meses(List<QueryDocumentSnapshot<Object?>>? docs, DateTime ahora) {
+  double _sumarUltimos12Meses(
+    List<QueryDocumentSnapshot<Object?>>? docs,
+    DateTime ahora,
+  ) {
     if (docs == null) return 0;
     final limite = DateTime(ahora.year, ahora.month - 11, 1);
     double total = 0;
@@ -62,11 +74,13 @@ class DashboardScreen extends StatelessWidget {
     return total;
   }
 
-  ({double pct, Color color, IconData icono, String mensaje}) _semaforo(double pct) {
+  ({double pct, Color color, IconData icono, String mensaje}) _semaforo(
+    double pct,
+  ) {
     if (pct < 0.70) {
       return (
         pct: pct,
-        color: const Color(0xFF10B981),
+        color: const Color(0xFF059669),
         icono: Icons.check_circle_outline,
         mensaje: 'Tranquilo, estás lejos del límite',
       );
@@ -74,14 +88,14 @@ class DashboardScreen extends StatelessWidget {
     if (pct < 0.90) {
       return (
         pct: pct,
-        color: const Color(0xFFF59E0B),
+        color: const Color(0xFFD97706),
         icono: Icons.warning_amber_rounded,
         mensaje: 'Atención, te estás acercando al tope anual',
       );
     }
     return (
       pct: pct,
-      color: const Color(0xFFFF3366),
+      color: const Color(0xFFDC2626),
       icono: Icons.error_outline,
       mensaje: 'Cuidado, riesgo de cambiar de categoría o exclusión',
     );
@@ -89,108 +103,127 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (_uid == null) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF0F172A),
-        appBar: AppBar(
-          title: const Text(
-            'ARGestión',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-          ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          automaticallyImplyLeading: false,
-        ),
-        body: const Center(
-          child: Text('Iniciá sesión para ver tu panel',
-              style: TextStyle(color: Color(0xFF94A3B8))),
-        ),
-      );
-    }
-
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(_uid)
-          .snapshots(),
-      builder: (context, userSnap) {
-        Map<String, dynamic>? userData;
-        try {
-          userData = userSnap.data?.data() as Map<String, dynamic>?;
-        } catch (_) {
-          userData = null;
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, authSnapshot) {
+        final authUser = authSnapshot.data ?? FirebaseAuth.instance.currentUser;
+        if (authUser == null) {
+          return Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: AppBar(
+              title: const Text(
+                'ARGestión',
+                style: TextStyle(
+                  color: Color(0xFF0F172A),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              backgroundColor: Colors.white,
+              elevation: 0,
+              automaticallyImplyLeading: false,
+            ),
+            body: const Center(
+              child: Text(
+                'Iniciá sesión para ver tu panel',
+                style: TextStyle(color: Color(0xFF64748B)),
+              ),
+            ),
+          );
         }
 
-        final authUser = FirebaseAuth.instance.currentUser;
-        final firestoreName = userData?['nombre'] as String?;
-        final authName = authUser?.displayName;
-        final resolvedName = (firestoreName != null && firestoreName.trim().isNotEmpty)
-            ? firestoreName.trim()
-            : ((authName != null && authName.trim().isNotEmpty)
-                ? authName.trim()
-                : 'Usuario');
-        final email =
-            authUser?.email ?? (userData?['email'] as String? ?? 'Sin correo');
-        final cuit = userData?['cuit'] as String?;
-        final categoria =
-            _normalizarCategoria(userData?['categoria'] as String?);
-        final primerNombre = resolvedName.split(' ').first;
-        final inicial =
-            resolvedName.isNotEmpty ? resolvedName[0].toUpperCase() : 'U';
+        final uid = authUser.uid;
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('usuarios')
+              .doc(uid)
+              .snapshots(),
+          builder: (context, userSnap) {
+            Map<String, dynamic>? userData;
+            try {
+              userData = userSnap.data?.data() as Map<String, dynamic>?;
+            } catch (_) {
+              userData = null;
+            }
 
-        return Scaffold(
-          backgroundColor: const Color(0xFF0F172A),
-          appBar: AppBar(
-            title: const Text(
-              'ARGestión',
-              style:
-                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            automaticallyImplyLeading: false,
-            actions: [
-              IconButton(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.notifications_outlined,
-                        color: Colors.white, size: 24),
-                    Positioned(
-                      top: 1,
-                      right: 1,
-                      child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF10B981),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ],
+            final firestoreName = userData?['nombre'] as String?;
+            final resolvedName = _resolverNombre(
+              nombreFirestore: firestoreName,
+              nombreAuth: authUser.displayName,
+              correo: authUser.email,
+            );
+            final email =
+                authUser.email ??
+                (userData?['email'] as String? ?? 'Sin correo');
+            final cuit = userData?['cuit'] as String?;
+            final categoria = _normalizarCategoria(
+              userData?['categoria'] as String?,
+            );
+            final primerNombre = resolvedName.split(' ').first;
+            final inicial = resolvedName.isNotEmpty
+                ? resolvedName[0].toUpperCase()
+                : 'U';
+
+            return Scaffold(
+              backgroundColor: Colors.transparent,
+              appBar: AppBar(
+                title: const Text(
+                  'ARGestión',
+                  style: TextStyle(
+                    color: Color(0xFF0F172A),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                tooltip: 'Notificaciones',
-                onPressed: () => _mostrarNotificaciones(context),
+                backgroundColor: Colors.white,
+                elevation: 0,
+                automaticallyImplyLeading: false,
+                actions: [
+                  IconButton(
+                    icon: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Icon(
+                          Icons.notifications_outlined,
+                          color: Color(0xFF0F172A),
+                          size: 24,
+                        ),
+                        Positioned(
+                          top: 1,
+                          right: 1,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF059669),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    tooltip: 'Notificaciones',
+                    onPressed: () => _mostrarNotificaciones(context),
+                  ),
+                  const SizedBox(width: 4),
+                  _buildMenuUsuario(
+                    context: context,
+                    inicial: inicial,
+                    primerNombre: primerNombre,
+                    resolvedName: resolvedName,
+                    email: email,
+                    cuit: cuit,
+                    categoria: categoria,
+                  ),
+                ],
               ),
-              const SizedBox(width: 4),
-              _buildMenuUsuario(
+              body: _buildFacturasBody(
                 context: context,
-                inicial: inicial,
-                primerNombre: primerNombre,
-                resolvedName: resolvedName,
-                email: email,
-                cuit: cuit,
+                uid: uid,
+                userData: userData,
                 categoria: categoria,
+                resolvedName: resolvedName,
               ),
-            ],
-          ),
-          body: _buildFacturasBody(
-            context: context,
-            uid: _uid!,
-            userData: userData,
-            categoria: categoria,
-          ),
+            );
+          },
         );
       },
     );
@@ -207,11 +240,11 @@ class DashboardScreen extends StatelessWidget {
   }) {
     return PopupMenuButton<String>(
       tooltip: 'Menú de usuario',
-      color: const Color(0xFF1E293B),
+      color: const Color(0xFFFFFFFF),
       elevation: 8,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: Color(0xFF334155)),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       offset: const Offset(0, 52),
       onSelected: (value) {
@@ -237,7 +270,11 @@ class DashboardScreen extends StatelessWidget {
                     height: 42,
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                        colors: [
+                          Color(0xFF047857),
+                          Color(0xFF059669),
+                          Color(0xFF10B981),
+                        ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -262,7 +299,7 @@ class DashboardScreen extends StatelessWidget {
                         Text(
                           resolvedName,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: Color(0xFF0F172A),
                             fontSize: 14.5,
                             fontWeight: FontWeight.bold,
                           ),
@@ -275,7 +312,7 @@ class DashboardScreen extends StatelessWidget {
                               ? 'CUIT: ${cuit.trim()} • $email'
                               : email,
                           style: const TextStyle(
-                            color: Color(0xFF94A3B8),
+                            color: Color(0xFF64748B),
                             fontSize: 11.5,
                           ),
                           maxLines: 1,
@@ -290,10 +327,10 @@ class DashboardScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  color: const Color(0xFF059669).withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.4),
+                    color: const Color(0xFF059669).withValues(alpha: 0.4),
                   ),
                 ),
                 child: Row(
@@ -303,7 +340,7 @@ class DashboardScreen extends StatelessWidget {
                       width: 6,
                       height: 6,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF10B981),
+                        color: Color(0xFF059669),
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -311,7 +348,7 @@ class DashboardScreen extends StatelessWidget {
                     Text(
                       'Cat. $categoria - Al día',
                       style: const TextStyle(
-                        color: Color(0xFF10B981),
+                        color: Color(0xFF059669),
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                       ),
@@ -328,7 +365,7 @@ class DashboardScreen extends StatelessWidget {
           padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Icon(Icons.person_rounded, color: Color(0xFF10B981), size: 20),
+              Icon(Icons.person_rounded, color: Color(0xFF059669), size: 20),
               SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -338,17 +375,14 @@ class DashboardScreen extends StatelessWidget {
                     Text(
                       'Mi Perfil',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF0F172A),
                         fontWeight: FontWeight.w600,
                         fontSize: 13.5,
                       ),
                     ),
                     Text(
                       'Datos fiscales y categoría de monotributo',
-                      style: TextStyle(
-                        color: Color(0xFF94A3B8),
-                        fontSize: 11,
-                      ),
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
                     ),
                   ],
                 ),
@@ -362,12 +396,12 @@ class DashboardScreen extends StatelessWidget {
           padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Icon(Icons.logout_rounded, color: Color(0xFFFF3366), size: 20),
+              Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 20),
               SizedBox(width: 12),
               Text(
                 'Cerrar Sesión',
                 style: TextStyle(
-                  color: Color(0xFFFF3366),
+                  color: Color(0xFFDC2626),
                   fontWeight: FontWeight.w600,
                   fontSize: 13.5,
                 ),
@@ -380,9 +414,16 @@ class DashboardScreen extends StatelessWidget {
         margin: const EdgeInsets.only(right: 14),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFF1E293B),
+          color: const Color(0xFFFFFFFF),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFF334155)),
+          border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0F0F172A),
+              blurRadius: 14,
+              offset: Offset(0, 5),
+            ),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -392,7 +433,11 @@ class DashboardScreen extends StatelessWidget {
               height: 32,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
+                  colors: [
+                    Color(0xFF047857),
+                    Color(0xFF059669),
+                    Color(0xFF10B981),
+                  ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -415,7 +460,7 @@ class DashboardScreen extends StatelessWidget {
               child: Text(
                 primerNombre,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: Color(0xFF0F172A),
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -426,7 +471,7 @@ class DashboardScreen extends StatelessWidget {
             const SizedBox(width: 2),
             const Icon(
               Icons.keyboard_arrow_down_rounded,
-              color: Color(0xFF94A3B8),
+              color: Color(0xFF64748B),
               size: 18,
             ),
           ],
@@ -440,9 +485,12 @@ class DashboardScreen extends StatelessWidget {
     required String uid,
     required Map<String, dynamic>? userData,
     required String categoria,
+    required String resolvedName,
   }) {
     final tienePerfil = userData != null;
-    final tope = _topesMonotributo[categoria] ?? _topesMonotributo['A']!;
+    final tope =
+        MonotributoCategory.annualIncomeLimits[categoria] ??
+        MonotributoCategory.annualIncomeLimits['A']!;
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -450,209 +498,254 @@ class DashboardScreen extends StatelessWidget {
           .where('id_usuario', isEqualTo: uid)
           .snapshots(),
       builder: (context, facSnap) {
-            if (facSnap.connectionState == ConnectionState.waiting) {
-              return const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF10B981)));
-            }
+        if (facSnap.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF059669)),
+          );
+        }
 
-            if (facSnap.hasError) {
-              return const Center(
-                  child: Text('Error al cargar los datos',
-                      style: TextStyle(color: Color(0xFFFF3366))));
-            }
+        if (facSnap.hasError) {
+          return const Center(
+            child: Text(
+              'Error al cargar los datos',
+              style: TextStyle(color: Color(0xFFDC2626)),
+            ),
+          );
+        }
 
-            final facturasDocs = facSnap.data?.docs;
-            final ahora = DateTime.now();
-            final facturado12M = _sumarUltimos12Meses(facturasDocs, ahora);
+        final facturasDocs = facSnap.data?.docs;
+        final ahora = DateTime.now();
+        final facturado12M = _sumarUltimos12Meses(facturasDocs, ahora);
 
-            final saldoDisponible = (tope - facturado12M).clamp(0.0, double.infinity);
-            final mesesRestantes = (12 - ahora.month + 1).clamp(1, 12);
-            final cupoMensual = saldoDisponible > 0
-                ? saldoDisponible / mesesRestantes
-                : 0.0;
+        final saldoDisponible = (tope - facturado12M).clamp(
+          0.0,
+          double.infinity,
+        );
+        final mesesRestantes = (12 - ahora.month + 1).clamp(1, 12);
+        final cupoMensual = saldoDisponible > 0
+            ? saldoDisponible / mesesRestantes
+            : 0.0;
 
-            final pct = tope > 0 ? facturado12M / tope : 0.0;
-            final semaforo = _semaforo(pct);
-            final formato =
-                NumberFormat.currency(locale: 'es_AR', symbol: '\$', decimalDigits: 0);
+        final pct = tope > 0 ? facturado12M / tope : 0.0;
+        final semaforo = _semaforo(pct);
+        final formato = NumberFormat.currency(
+          locale: 'es_AR',
+          symbol: '\$',
+          decimalDigits: 0,
+        );
 
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Saludo de bienvenida con estilo y nombre del usuario
-                  _buildSaludoBienvenida(userData),
-                  const SizedBox(height: 16),
-                  if (!tienePerfil) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.info_outline,
-                              color: Color(0xFFF59E0B), size: 22),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'No encontramos tu perfil de monotributo en Firestore '
-                              '(usuarios/{uid}). Si ya te registraste, tus datos podrían '
-                              'estar guardados con otro usuario. Mientras tanto se usa '
-                              'Categoría A por defecto.',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
-                      ),
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Saludo de bienvenida con estilo y nombre del usuario
+              _buildSaludoBienvenida(resolvedName),
+              const SizedBox(height: 16),
+              if (!tienePerfil) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFFD97706).withValues(alpha: 0.4),
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                  Row(
+                  ),
+                  child: const Row(
                     children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Color(0xFFD97706),
+                        size: 22,
+                      ),
+                      SizedBox(width: 10),
                       Expanded(
-                          child: _buildStatusCard('Categoría Actual', categoria)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child:
-                              _buildStatusCard('Tope Anual', formato.format(tope))),
+                        child: Text(
+                          'No encontramos tu perfil de monotributo en Firestore '
+                          '(usuarios/{uid}). Si ya te registraste, tus datos podrían '
+                          'estar guardados con otro usuario. Mientras tanto se usa '
+                          'Categoría A por defecto.',
+                          style: TextStyle(
+                            color: Color(0xFF0F172A),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-
-                  // ⭐ Tarjeta principal destacada
-                  Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF1E1B4B), Color(0xFF312E81)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: const Color(0xFF4338CA).withValues(alpha: 0.3)),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Podés facturar este mes hasta:',
-                            style: TextStyle(
-                                fontSize: 14, color: Color(0xFFA5B4FC)),
-                          ),
-                          const SizedBox(height: 8),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              formato.format(cupoMensual.round()),
-                              style: const TextStyle(
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Cupo estimado: tu categoría $categoria permite '
-                            '${formato.format(tope)} por año.',
-                            style: const TextStyle(
-                                fontSize: 12, color: Color(0xFF94A3B8)),
-                          ),
-                          const SizedBox(height: 18),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: LinearProgressIndicator(
-                              value: semaforo.pct.clamp(0.0, 1.0),
-                              minHeight: 12,
-                              backgroundColor: const Color(0xFF1E293B),
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(semaforo.color),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: semaforo.color.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                  color: semaforo.color.withValues(alpha: 0.4)),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(semaforo.icono,
-                                    color: semaforo.color, size: 26),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    semaforo.mensaje,
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 13),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _buildMiniDato(
-                                  'Facturado (12 meses)',
-                                  formato.format(facturado12M.round())),
-                              _buildMiniDato(
-                                  'Saldo anual',
-                                  formato.format(saldoDisponible.round())),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildStatusCard('Categoría Actual', categoria),
                   ),
-
-                  const SizedBox(height: 20),
-
-                  // ⚡ Acciones rápidas
-                  _buildBotonPrimario(
-                    icon: Icons.add_circle_outline,
-                    text: 'Nueva Factura',
-                    onTap: onNuevaFacturaPressed,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildBotonSecundario(
-                    icon: Icons.history,
-                    text: 'Ver Historial',
-                    onTap: onVerHistorialPressed,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildStatusCard('Tope Anual', formato.format(tope)),
                   ),
                 ],
               ),
-            );
-          },
+              const SizedBox(height: 20),
+
+              // ⭐ Tarjeta principal destacada
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF065F46),
+                      Color(0xFF059669),
+                      Color(0xFF10B981),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: const Color(0xFF059669).withValues(alpha: 0.35),
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x26059669),
+                      blurRadius: 18,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Podés facturar este mes hasta:',
+                        style: TextStyle(fontSize: 14, color: Colors.white),
+                      ),
+                      const SizedBox(height: 8),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          formato.format(cupoMensual.round()),
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Cupo estimado: tu categoría $categoria permite '
+                        '${formato.format(tope)} por año.',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          value: semaforo.pct.clamp(0.0, 1.0),
+                          minHeight: 12,
+                          backgroundColor: Colors.white.withValues(alpha: 0.2),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            semaforo.color,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: semaforo.color.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: semaforo.color.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              semaforo.icono,
+                              color: semaforo.color,
+                              size: 26,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                semaforo.mensaje,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildMiniDato(
+                            'Facturado (12 meses)',
+                            formato.format(facturado12M.round()),
+                          ),
+                          _buildMiniDato(
+                            'Saldo anual',
+                            formato.format(saldoDisponible.round()),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ⚡ Acciones rápidas
+              _buildBotonPrimario(
+                icon: Icons.add_circle_outline,
+                text: 'Nueva Factura',
+                onTap: onNuevaFacturaPressed,
+              ),
+              const SizedBox(height: 12),
+              _buildBotonSecundario(
+                icon: Icons.history,
+                text: 'Ver Historial',
+                onTap: onVerHistorialPressed,
+              ),
+            ],
+          ),
         );
+      },
+    );
   }
 
   Widget _buildMiniDato(String title, String value) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 11, color: Color(0xFFE0E7FF)),
+        ),
         const SizedBox(height: 2),
-        Text(value,
-            style: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
       ],
     );
   }
@@ -660,23 +753,40 @@ class DashboardScreen extends StatelessWidget {
   Widget _buildStatusCard(String title, String value) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF334155)),
+        color: const Color(0xFFFFFFFF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F0F172A),
+            blurRadius: 14,
+            offset: Offset(0, 5),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
         child: Column(
           children: [
-            Text(title,
-                style: const TextStyle(
-                    color: Color(0xFF64748B), fontSize: 13, fontWeight: FontWeight.w500)),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Color(0xFF64748B),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             const SizedBox(height: 8),
             FittedBox(
               fit: BoxFit.scaleDown,
-              child: Text(value,
-                  style: const TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white)),
+              child: Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
             ),
           ],
         ),
@@ -684,13 +794,16 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildBotonPrimario(
-      {required IconData icon, required String text, VoidCallback? onTap}) {
+  Widget _buildBotonPrimario({
+    required IconData icon,
+    required String text,
+    VoidCallback? onTap,
+  }) {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
+          colors: [Color(0xFF059669), Color(0xFF059669)],
         ),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -701,60 +814,72 @@ class DashboardScreen extends StatelessWidget {
           shadowColor: Colors.transparent,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, size: 20),
             const SizedBox(width: 8),
-            Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            Text(
+              text,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBotonSecundario(
-      {required IconData icon, required String text, VoidCallback? onTap}) {
+  Widget _buildBotonSecundario({
+    required IconData icon,
+    required String text,
+    VoidCallback? onTap,
+  }) {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        border: Border.all(color: const Color(0xFF334155)),
+        color: const Color(0xFFFFFFFF),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: ElevatedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, size: 20, color: const Color(0xFF6366F1)),
-        label: Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        icon: Icon(icon, size: 20, color: const Color(0xFF059669)),
+        label: Text(
+          text,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
-          foregroundColor: Colors.white,
+          foregroundColor: const Color(0xFF059669),
           padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSaludoBienvenida(Map<String, dynamic>? userData) {
-    final authUser = FirebaseAuth.instance.currentUser;
-    final firestoreName = userData?['nombre'] as String?;
-    final authName = authUser?.displayName;
-
-    String resolvedName = 'Usuario';
-    if (firestoreName != null && firestoreName.trim().isNotEmpty) {
-      resolvedName = firestoreName.trim();
-    } else if (authName != null && authName.trim().isNotEmpty) {
-      resolvedName = authName.trim();
-    }
-
+  Widget _buildSaludoBienvenida(String resolvedName) {
     final ahora = DateTime.now();
     final meses = [
-      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+      'Enero',
+      'Febrero',
+      'Marzo',
+      'Abril',
+      'Mayo',
+      'Junio',
+      'Julio',
+      'Agosto',
+      'Septiembre',
+      'Octubre',
+      'Noviembre',
+      'Diciembre',
     ];
     final mesActual = meses[ahora.month - 1];
 
@@ -765,15 +890,16 @@ class DashboardScreen extends StatelessWidget {
         final etiquetaFiscal = Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+            color: const Color(0xFF059669).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: const Color(0xFF10B981).withValues(alpha: 0.3),
+              color: const Color(0xFF059669).withValues(alpha: 0.3),
             ),
           ),
           child: Column(
-            crossAxisAlignment:
-                isCompact ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+            crossAxisAlignment: isCompact
+                ? CrossAxisAlignment.start
+                : CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
               Row(
@@ -783,7 +909,7 @@ class DashboardScreen extends StatelessWidget {
                     width: 7,
                     height: 7,
                     decoration: const BoxDecoration(
-                      color: Color(0xFF10B981),
+                      color: Color(0xFF059669),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -791,7 +917,7 @@ class DashboardScreen extends StatelessWidget {
                   const Text(
                     'Estado: Al día',
                     style: TextStyle(
-                      color: Color(0xFF10B981),
+                      color: Color(0xFF059669),
                       fontSize: 11.5,
                       fontWeight: FontWeight.bold,
                     ),
@@ -802,7 +928,7 @@ class DashboardScreen extends StatelessWidget {
               Text(
                 'Período $mesActual ${ahora.year}',
                 style: const TextStyle(
-                  color: Color(0xFF94A3B8),
+                  color: Color(0xFF64748B),
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),
@@ -815,9 +941,16 @@ class DashboardScreen extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.04),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFF334155)),
+            border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0F0F172A),
+                blurRadius: 14,
+                offset: Offset(0, 5),
+              ),
+            ],
           ),
           child: isCompact
               ? Column(
@@ -828,12 +961,14 @@ class DashboardScreen extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.all(9),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                            color: const Color(
+                              0xFF059669,
+                            ).withValues(alpha: 0.15),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
                             Icons.waving_hand_rounded,
-                            color: Color(0xFF10B981),
+                            color: Color(0xFF059669),
                             size: 20,
                           ),
                         ),
@@ -845,7 +980,7 @@ class DashboardScreen extends StatelessWidget {
                               Text(
                                 '¡Bienvenido a ARGestión, $resolvedName!',
                                 style: const TextStyle(
-                                  color: Colors.white,
+                                  color: Color(0xFF0F172A),
                                   fontSize: 15.5,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: -0.3,
@@ -855,7 +990,7 @@ class DashboardScreen extends StatelessWidget {
                               const Text(
                                 'Panel de control fiscal y estado de monotributo',
                                 style: TextStyle(
-                                  color: Color(0xFF94A3B8),
+                                  color: Color(0xFF64748B),
                                   fontSize: 11.5,
                                 ),
                               ),
@@ -873,12 +1008,12 @@ class DashboardScreen extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        color: const Color(0xFF059669).withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
                         Icons.waving_hand_rounded,
-                        color: Color(0xFF10B981),
+                        color: Color(0xFF059669),
                         size: 22,
                       ),
                     ),
@@ -890,7 +1025,7 @@ class DashboardScreen extends StatelessWidget {
                           Text(
                             '¡Bienvenido a ARGestión, $resolvedName!',
                             style: const TextStyle(
-                              color: Colors.white,
+                              color: Color(0xFF0F172A),
                               fontSize: 16.5,
                               fontWeight: FontWeight.bold,
                               letterSpacing: -0.3,
@@ -900,7 +1035,7 @@ class DashboardScreen extends StatelessWidget {
                           const Text(
                             'Panel de control fiscal y estado de monotributo',
                             style: TextStyle(
-                              color: Color(0xFF94A3B8),
+                              color: Color(0xFF64748B),
                               fontSize: 12,
                             ),
                           ),
@@ -926,7 +1061,10 @@ class DashboardScreen extends StatelessWidget {
       builder: (dialogCtx) {
         return StreamBuilder<DocumentSnapshot>(
           stream: uid != null
-              ? FirebaseFirestore.instance.collection('usuarios').doc(uid).snapshots()
+              ? FirebaseFirestore.instance
+                    .collection('usuarios')
+                    .doc(uid)
+                    .snapshots()
               : null,
           builder: (context, snapshot) {
             Map<String, dynamic>? data;
@@ -938,22 +1076,22 @@ class DashboardScreen extends StatelessWidget {
               }
             }
 
-            final firestoreName = data?['nombre'] as String?;
-            final authName = user?.displayName;
-            final nombre = (firestoreName != null && firestoreName.trim().isNotEmpty)
-                ? firestoreName.trim()
-                : ((authName != null && authName.trim().isNotEmpty)
-                    ? authName.trim()
-                    : 'Usuario');
+            final nombre = _resolverNombre(
+              nombreFirestore: data?['nombre'] as String?,
+              nombreAuth: user?.displayName,
+              correo: user?.email,
+            );
 
-            final categoria = _normalizarCategoria(data?['categoria'] as String?);
+            final categoria = _normalizarCategoria(
+              data?['categoria'] as String?,
+            );
             final cuit = data?['cuit'] as String? ?? 'No registrado';
 
             return Dialog(
-              backgroundColor: const Color(0xFF1E293B),
+              backgroundColor: const Color(0xFFFFFFFF),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
-                side: const BorderSide(color: Color(0xFF334155)),
+                side: const BorderSide(color: Color(0xFFE2E8F0)),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(22.0),
@@ -965,14 +1103,16 @@ class DashboardScreen extends StatelessWidget {
                       height: 64,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFF059669), Color(0xFF10B981)],
+                          colors: [Color(0xFF059669), Color(0xFF059669)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                            color: const Color(
+                              0xFF059669,
+                            ).withValues(alpha: 0.3),
                             blurRadius: 10,
                             offset: const Offset(0, 4),
                           ),
@@ -982,7 +1122,7 @@ class DashboardScreen extends StatelessWidget {
                         child: Text(
                           nombre.isNotEmpty ? nombre[0].toUpperCase() : 'U',
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: Color(0xFFFFFFFF),
                             fontSize: 26,
                             fontWeight: FontWeight.bold,
                           ),
@@ -993,7 +1133,7 @@ class DashboardScreen extends StatelessWidget {
                     Text(
                       nombre,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF0F172A),
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -1003,7 +1143,7 @@ class DashboardScreen extends StatelessWidget {
                     Text(
                       email,
                       style: const TextStyle(
-                        color: Color(0xFF94A3B8),
+                        color: Color(0xFF64748B),
                         fontSize: 13,
                       ),
                       textAlign: TextAlign.center,
@@ -1012,26 +1152,26 @@ class DashboardScreen extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0F172A),
+                        color: const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF334155)),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
                       child: Column(
                         children: [
                           _buildPerfilRow(
                             icon: Icons.category_rounded,
-                            iconColor: const Color(0xFF10B981),
+                            iconColor: const Color(0xFF059669),
                             label: 'Categoría Monotributo',
                             value: 'Categoría $categoria',
                           ),
-                          const Divider(color: Color(0xFF1E293B), height: 16),
+                          const Divider(color: Color(0xFFFFFFFF), height: 16),
                           _buildPerfilRow(
                             icon: Icons.badge_outlined,
-                            iconColor: const Color(0xFF6366F1),
+                            iconColor: const Color(0xFF059669),
                             label: 'CUIT / Identificación',
                             value: cuit,
                           ),
-                          const Divider(color: Color(0xFF1E293B), height: 16),
+                          const Divider(color: Color(0xFFFFFFFF), height: 16),
                           _buildPerfilRow(
                             icon: Icons.mail_outline_rounded,
                             iconColor: const Color(0xFF38BDF8),
@@ -1047,15 +1187,17 @@ class DashboardScreen extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: () => Navigator.of(dialogCtx).pop(),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF334155),
-                          foregroundColor: Colors.white,
+                          backgroundColor: const Color(0xFFF8FAFC),
+                          foregroundColor: const Color(0xFF0F172A),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                        child: const Text('Cerrar',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Cerrar',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],
@@ -1084,10 +1226,7 @@ class DashboardScreen extends StatelessWidget {
             children: [
               Text(
                 label,
-                style: const TextStyle(
-                  color: Color(0xFF64748B),
-                  fontSize: 11,
-                ),
+                style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
               ),
               Text(
                 value,
@@ -1108,39 +1247,46 @@ class DashboardScreen extends StatelessWidget {
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: const Color(0xFFFFFFFF),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF334155)),
+          side: const BorderSide(color: Color(0xFFE2E8F0)),
         ),
         title: const Row(
           children: [
-            Icon(Icons.logout_rounded, color: Color(0xFFFF3366), size: 22),
+            Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 22),
             SizedBox(width: 10),
-            Text('Cerrar Sesión',
-                style: TextStyle(color: Colors.white, fontSize: 18)),
+            Text(
+              'Cerrar Sesión',
+              style: TextStyle(color: Color(0xFF0F172A), fontSize: 18),
+            ),
           ],
         ),
         content: const Text(
           '¿Estás seguro de que deseas salir de tu cuenta?',
-          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+          style: TextStyle(color: Color(0xFF64748B), fontSize: 14),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancelar',
-                style: TextStyle(color: Color(0xFF94A3B8))),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: Color(0xFF64748B)),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(dialogCtx).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFF3366),
+              backgroundColor: const Color(0xFFDC2626),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: const Text('Salir',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Salir',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -1162,10 +1308,10 @@ class DashboardScreen extends StatelessWidget {
       context: context,
       builder: (dialogCtx) {
         return Dialog(
-          backgroundColor: const Color(0xFF1E293B),
+          backgroundColor: const Color(0xFFFFFFFF),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: Color(0xFF334155)),
+            side: const BorderSide(color: Color(0xFFE2E8F0)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(20.0),
@@ -1178,12 +1324,12 @@ class DashboardScreen extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                        color: const Color(0xFF059669).withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
                         Icons.notifications_active_outlined,
-                        color: Color(0xFF10B981),
+                        color: Color(0xFF059669),
                         size: 22,
                       ),
                     ),
@@ -1191,7 +1337,7 @@ class DashboardScreen extends StatelessWidget {
                     const Text(
                       'Notificaciones y Avisos',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Color(0xFF0F172A),
                         fontSize: 17,
                         fontWeight: FontWeight.bold,
                       ),
@@ -1201,7 +1347,7 @@ class DashboardScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 _buildNotificationItem(
                   icon: Icons.calendar_month_rounded,
-                  iconColor: const Color(0xFFF59E0B),
+                  iconColor: const Color(0xFFD97706),
                   titulo: 'Vencimiento Monotributo',
                   descripcion:
                       'La cuota mensual vence el día 20 de cada mes. Podés generar tu VEP o revisar el estado en la pestaña Pagos.',
@@ -1209,7 +1355,7 @@ class DashboardScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 _buildNotificationItem(
                   icon: Icons.sync_alt_rounded,
-                  iconColor: const Color(0xFF6366F1),
+                  iconColor: const Color(0xFF059669),
                   titulo: 'Recategorización Semestral',
                   descripcion:
                       'ARCA evalúa los ingresos en enero y julio. Verificá tu semáforo fiscal en Reportes.',
@@ -1217,7 +1363,7 @@ class DashboardScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 _buildNotificationItem(
                   icon: Icons.check_circle_outline_rounded,
-                  iconColor: const Color(0xFF10B981),
+                  iconColor: const Color(0xFF059669),
                   titulo: 'Estado de cuenta al día',
                   descripcion:
                       'No tenés alertas urgentes de exclusión en este momento.',
@@ -1228,15 +1374,19 @@ class DashboardScreen extends StatelessWidget {
                   child: TextButton(
                     onPressed: () => Navigator.of(dialogCtx).pop(),
                     style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF10B981),
+                      foregroundColor: const Color(0xFF059669),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text('Entendido',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Entendido',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -1256,9 +1406,16 @@ class DashboardScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF334155)),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1272,7 +1429,7 @@ class DashboardScreen extends StatelessWidget {
                 Text(
                   titulo,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFF0F172A),
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1281,7 +1438,7 @@ class DashboardScreen extends StatelessWidget {
                 Text(
                   descripcion,
                   style: const TextStyle(
-                    color: Color(0xFF94A3B8),
+                    color: Color(0xFF64748B),
                     fontSize: 11.5,
                     height: 1.35,
                   ),
