@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'models/usuario_model.dart';
-import 'main_navigation.dart';
+import 'login_screen.dart';
+import 'services/auth_verification_service.dart';
 
 class RegistroScreen extends StatefulWidget {
   const RegistroScreen({super.key});
@@ -82,16 +83,29 @@ class _RegistroScreenState extends State<RegistroScreen> {
           .doc(uidUser)
           .set(nuevoUsuario.toMap());
 
+      // a. Enviar correo de verificación
+      await userCredential.user?.sendEmailVerification();
+
+      // b. Cerrar sesión activa para evitar ingreso sin validar
+      await FirebaseAuth.instance.signOut();
+
       if (mounted) {
+        // c. Mostrar aviso informativo claro
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('✔️ ¡Usuario registrado con éxito en el sistema!'),
-            backgroundColor: Color(0xFF10B981),
+            content: Text(
+              AuthVerificationService.mensajeVerificacionEnviada,
+              style: TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Color(0xFF059669),
+            duration: Duration(seconds: 6),
           ),
         );
+
+        // d. Redirigir a la pantalla de Login (login_screen.dart)
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const MainNavigation()),
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
           (route) => false,
         );
       }

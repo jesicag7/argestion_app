@@ -24,6 +24,34 @@ class NuevaFacturaScreen extends StatefulWidget {
     this.comprobanteAAnular,
   });
 
+  /// Validación estricta de CUIT/CUIL del cliente (Algoritmo Módulo 11 ARCA/AFIP)
+  static String? validarCuitCliente(String? val, {String tipoDoc = 'CUIT'}) {
+    if (tipoDoc == 'CUIT') {
+      final text = val?.trim() ?? '';
+      if (text.isEmpty) {
+        return 'Por favor ingresá el CUIT/CUIL';
+      }
+      if (text.length < 11) {
+        return 'El CUIT debe tener exactamente 11 números';
+      }
+      if (!ArcaFiscalService.esCuitValido(text)) {
+        return 'El CUIT ingresado no es válido';
+      }
+      return null;
+    }
+    if (tipoDoc == 'DNI') {
+      final text = val?.trim() ?? '';
+      if (text.isEmpty) {
+        return 'Por favor ingresá el DNI';
+      }
+      if (text.length < 7 || text.length > 8) {
+        return 'El DNI debe tener 7 u 8 números';
+      }
+      return null;
+    }
+    return null;
+  }
+
   @override
   State<NuevaFacturaScreen> createState() => _NuevaFacturaScreenState();
 }
@@ -48,7 +76,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
 
   // b) Datos del Receptor / Cliente
   String _condicionIvaCliente = 'Consumidor Final';
-  String _tipoDocCliente = 'DNI';
+  String _tipoDocCliente = 'CUIT';
   final TextEditingController _nroDocController = TextEditingController();
   final TextEditingController _nombreClienteController =
       TextEditingController();
@@ -786,6 +814,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       _domicilioClienteController.clear();
       _clienteIdSeleccionado = null;
       _guardarEnAgenda = false;
+      _tipoDocCliente = 'CUIT';
       _fechaEmision = DateTime.now();
       _periodoDesde = DateTime(DateTime.now().year, DateTime.now().month, 1);
       _periodoHasta = DateTime.now();
@@ -1228,6 +1257,11 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                       if (val != null) {
                         setState(() {
                           _condicionIvaCliente = val;
+                          if (val == 'Responsable Inscripto' ||
+                              val == 'Monotributista' ||
+                              val == 'Exento') {
+                            _tipoDocCliente = 'CUIT';
+                          }
                           _clienteIdSeleccionado = null;
                         });
                       }
@@ -1241,9 +1275,10 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                       Expanded(
                         flex: 4,
                         child: _buildDropdownField<String>(
+                          key: ValueKey(_tipoDocCliente),
                           label: 'Tipo Doc',
                           initialValue: _tipoDocCliente,
-                          items: const ['DNI', 'CUIT', 'Consumidor Final'],
+                          items: const ['CUIT', 'DNI', 'Consumidor Final'],
                           onChanged: (val) {
                             if (val != null) {
                               setState(() {
@@ -1262,13 +1297,24 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(11),
                           ],
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
                           style: const TextStyle(color: Color(0xFF0F172A)),
                           decoration: _inputDecoration(
-                            labelText: 'N° Documento',
+                            labelText: _tipoDocCliente == 'CUIT'
+                                ? 'CUIT / CUIL *'
+                                : 'N° Documento',
                             prefixIcon: Icons.badge_outlined,
-                            hintText: 'Ej. 38491823',
+                            hintText: _tipoDocCliente == 'CUIT'
+                                ? 'Ej. 20111111112'
+                                : 'Ej. 38491823',
                           ),
+                          validator: (val) =>
+                              NuevaFacturaScreen.validarCuitCliente(
+                                val,
+                                tipoDoc: _tipoDocCliente,
+                              ),
                         ),
                       ),
                     ],
@@ -1511,12 +1557,14 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
   }
 
   Widget _buildDropdownField<T>({
+    Key? key,
     required String label,
     required T initialValue,
     required List<T> items,
     required ValueChanged<T?> onChanged,
   }) {
     return DropdownButtonFormField<T>(
+      key: key,
       initialValue: initialValue,
       dropdownColor: const Color(0xFFFFFFFF),
       style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5),

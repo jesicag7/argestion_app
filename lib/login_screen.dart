@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'main_navigation.dart';
 import 'registro_screen.dart';
 import 'services/biometric_service.dart';
+import 'services/auth_verification_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isBiometricLoading = false;
   bool _biometricsAvailable = false;
   bool _obscurePassword = true;
+  bool _mostrarBotonReenvio = false;
 
   final BiometricService _biometricService = BiometricService();
 
@@ -65,6 +67,55 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  Future<void> _reenviarCorreoVerificacion([User? user]) async {
+    if (_isBusy) return;
+    setState(() => _isLoading = true);
+
+    try {
+      if (user != null) {
+        try {
+          await user.sendEmailVerification();
+          if (!mounted) return;
+          _mostrarAviso('Correo de verificación reenviado con éxito.');
+          return;
+        } catch (_) {}
+      }
+
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+
+      if (email.isNotEmpty && password.isNotEmpty) {
+        final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        await cred.user?.sendEmailVerification();
+        await FirebaseAuth.instance.signOut();
+        if (!mounted) return;
+        _mostrarAviso('Correo de verificación reenviado con éxito.');
+      } else {
+        if (!mounted) return;
+        _mostrarError(
+          'Ingresá tu correo y contraseña para reenviar la verificación.',
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      if (e.code == 'too-many-requests') {
+        _mostrarError('Por favor esperá unos minutos antes de solicitar otro reenvío.');
+      } else {
+        _mostrarError(
+          'No se pudo reenviar el correo: ${e.message ?? e.code}',
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _mostrarError('Error inesperado al reenviar el correo de verificación.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _iniciarSesion() async {
     if (_isBusy) return;
 
@@ -78,10 +129,44 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
+
+      final user = userCredential.user;
+      final bool isVerified = AuthVerificationService.isEmailVerified(user);
+
+      if (!isVerified) {
+        final unverifiedUser = user;
+        // a. Cierra la sesión activa con signOut
+        await FirebaseAuth.instance.signOut();
+
+        if (mounted) {
+          setState(() {
+            _mostrarBotonReenvio = true;
+          });
+
+          // b. Muestra aviso de error
+          // c. Ofrece opción/botón para reenviar correo de verificación
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                AuthVerificationService.mensajeCuentaNoVerificada,
+                style: TextStyle(color: Colors.white),
+              ),
+              backgroundColor: const Color(0xFFDC2626),
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(
+                label: 'Reenviar',
+                textColor: Colors.white,
+                onPressed: () => _reenviarCorreoVerificacion(unverifiedUser),
+              ),
+            ),
+          );
+        }
+        return;
+      }
 
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -138,12 +223,26 @@ class _LoginScreenState extends State<LoginScreen> {
           _mostrarAviso(resultado.message!);
         }
 
-        if (FirebaseAuth.instance.currentUser == null) {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser == null) {
           _mostrarError(
             'Tu sesión venció. Ingresá con tu correo y contraseña una vez para activar el acceso biométrico.',
           );
           return;
         }
+
+        if (!AuthVerificationService.isEmailVerified(currentUser)) {
+          await currentUser.reload();
+          if (!mounted) return;
+          if (!AuthVerificationService.isEmailVerified(currentUser)) {
+            await FirebaseAuth.instance.signOut();
+            if (!mounted) return;
+            _mostrarError(AuthVerificationService.mensajeCuentaNoVerificada);
+            return;
+          }
+        }
+
+        if (!mounted) return;
 
         Navigator.pushAndRemoveUntil(
           context,
@@ -336,6 +435,25 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                     ),
                   ),
+                  if (_mostrarBotonReenvio) ...[
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: _isBusy ? null : () => _reenviarCorreoVerificacion(),
+                      icon: const Icon(
+                        Icons.mark_email_unread_outlined,
+                        color: Color(0xFF059669),
+                        size: 20,
+                      ),
+                      label: const Text(
+                        'Reenviar correo de verificación',
+                        style: TextStyle(
+                          color: Color(0xFF059669),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+
                   const SizedBox(height: 24),
 
                   if (_biometricsAvailable) ...[
