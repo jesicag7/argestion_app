@@ -15,6 +15,14 @@ class HistorialFacturasScreen extends StatelessWidget {
     decimalDigits: 2,
   );
 
+  static bool _perteneceAUsuario(Map<String, dynamic>? data, String uid) {
+    if (data == null || uid.isEmpty) return false;
+    final userId = data['userId'];
+    final idUsuario = data['id_usuario'];
+    return (userId is String && userId.isNotEmpty && userId == uid) ||
+        (idUsuario is String && idUsuario.isNotEmpty && idUsuario == uid);
+  }
+
   Future<void> _actualizarEstadoCobro(
     BuildContext context,
     String facturaId,
@@ -183,7 +191,17 @@ class HistorialFacturasScreen extends StatelessWidget {
                     );
                   }
 
-                  final docs = snapshot.data?.docs ?? [];
+                  // Defensa en profundidad: solo se muestran documentos que
+                  // declaran explícitamente al usuario logueado. Los huérfanos
+                  // (sin campo de usuario, nulo o vacío) se descartan.
+                  final docs = (snapshot.data?.docs ?? [])
+                      .where(
+                        (doc) => _perteneceAUsuario(
+                          doc.data() as Map<String, dynamic>?,
+                          currentUser.uid,
+                        ),
+                      )
+                      .toList();
 
                   if (docs.isEmpty) {
                     return Center(

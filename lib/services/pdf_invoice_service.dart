@@ -5,6 +5,10 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 class PdfInvoiceService {
+  static const String _caeSimulado = '00000000000000 (MODO SIMULACIÓN / TEST)';
+  static const String _bannerNoValido =
+      'DOCUMENTO NO VÁLIDO COMO FACTURA - ENTORNO DE PRUEBAS';
+
   /// Genera y comparte el comprobante fiscal en formato PDF estilo oficial AFIP/ARCA
   static Future<void> shareInvoicePdf(Map<String, dynamic> data) async {
     final pdfBytes = await generateInvoicePdf(data);
@@ -41,20 +45,20 @@ class PdfInvoiceService {
         (data['qrUrl'] ?? data['qr_url'] ?? data['qrData'] ?? data['qr_data'])
             ?.toString();
     final vtoCae = _parseDate(data['fechaVtoCae'] ?? data['vto_cae']);
-    if (resultado != 'aprobado' ||
-        modoHomologacion ||
-        cae.length != 14 ||
-        vtoCae == null ||
-        qrContent == null ||
-        qrContent.isEmpty) {
-      throw StateError(
-        modoHomologacion
-            ? 'No se puede generar un comprobante fiscal oficial en modo '
-                  'homologación.'
-            : 'No se puede generar el comprobante: falta una autorización '
-                  'real de ARCA con CAE, vencimiento y QR.',
-      );
-    }
+    // Solo un comprobante con autorización real de ARCA (CAE, vencimiento y QR,
+    // fuera de homologación) se presenta como válido. El resto se genera igual,
+    // marcado como documento de prueba.
+    final esOficial =
+        resultado == 'aprobado' &&
+        !modoHomologacion &&
+        RegExp(r'^\d{14}$').hasMatch(cae) &&
+        vtoCae != null &&
+        qrContent != null &&
+        qrContent.isNotEmpty;
+    final caeMostrado = esOficial ? cae : _caeSimulado;
+    final vtoCaeStr = esOficial
+        ? _formatearFecha(vtoCae)
+        : _formatearFecha(data['fecha_emision']);
 
     final pdf = pw.Document();
 
@@ -116,8 +120,6 @@ class PdfInvoiceService {
         ? (data['monto'] as num).toDouble()
         : double.tryParse(data['monto']?.toString() ?? '0') ?? 0.0;
 
-    final vtoCaeStr = _formatearFecha(vtoCae);
-
     final currencyFormat = NumberFormat.currency(
       locale: 'es_AR',
       symbol: '\$ ',
@@ -129,7 +131,7 @@ class PdfInvoiceService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         build: (pw.Context context) {
-          return pw.Container(
+          final cuerpo = pw.Container(
             decoration: pw.BoxDecoration(
               border: pw.Border.all(color: PdfColors.black, width: 1),
             ),
@@ -137,6 +139,27 @@ class PdfInvoiceService {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
+                if (!esOficial) ...[
+                  pw.Container(
+                    width: double.infinity,
+                    alignment: pw.Alignment.center,
+                    padding: const pw.EdgeInsets.symmetric(vertical: 6),
+                    decoration: pw.BoxDecoration(
+                      color: PdfColors.red50,
+                      border: pw.Border.all(color: PdfColors.red800, width: 1),
+                    ),
+                    child: pw.Text(
+                      _bannerNoValido,
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.red800,
+                      ),
+                    ),
+                  ),
+                  pw.SizedBox(height: 6),
+                ],
                 // 1. CABECERA CON LETRA CENTRAL
                 pw.Container(
                   height: 100,
@@ -465,19 +488,36 @@ class PdfInvoiceService {
                   child: pw.Row(
                     crossAxisAlignment: pw.CrossAxisAlignment.center,
                     children: [
-                      pw.BarcodeWidget(
-                        barcode: pw.Barcode.qrCode(),
-                        data: qrContent,
-                        width: 72,
-                        height: 72,
-                      ),
+                      if (esOficial)
+                        pw.BarcodeWidget(
+                          barcode: pw.Barcode.qrCode(),
+                          data: qrContent,
+                          width: 72,
+                          height: 72,
+                        )
+                      else
+                        pw.Container(
+                          width: 72,
+                          height: 72,
+                          alignment: pw.Alignment.center,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border.all(color: PdfColors.grey600),
+                          ),
+                          child: pw.Text(
+                            'Sin QR\n(prueba)',
+                            textAlign: pw.TextAlign.center,
+                            style: const pw.TextStyle(fontSize: 7),
+                          ),
+                        ),
                       pw.SizedBox(width: 10),
                       pw.Expanded(
                         child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
                             pw.Text(
-                              'ARCA / AFIP - Comprobante Autorizado Electrónicamente',
+                              esOficial
+                                  ? 'ARCA / AFIP - Comprobante Autorizado Electrónicamente'
+                                  : 'Comprobante de prueba - sin autorización de ARCA',
                               style: pw.TextStyle(
                                 fontSize: 8.5,
                                 fontWeight: pw.FontWeight.bold,
@@ -508,7 +548,7 @@ class PdfInvoiceService {
                                 ),
                               ),
                               pw.Text(
-                                cae,
+                                caeMostrado,
                                 style: pw.TextStyle(
                                   fontSize: 9,
                                   fontWeight: pw.FontWeight.bold,
@@ -536,6 +576,28 @@ class PdfInvoiceService {
                 ),
               ],
             ),
+          );
+
+          if (esOficial) return cuerpo;
+          return pw.Stack(
+            children: [
+              cuerpo,
+              pw.Positioned.fill(
+                child: pw.Center(
+                  child: pw.Transform.rotateBox(
+                    angle: -0.6,
+                    child: pw.Text(
+                      'DOCUMENTO NO VÁLIDO COMO FACTURA',
+                      style: pw.TextStyle(
+                        fontSize: 42,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.grey300,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
