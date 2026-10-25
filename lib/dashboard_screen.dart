@@ -495,7 +495,12 @@ class DashboardScreen extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('facturas')
-          .where('id_usuario', isEqualTo: uid)
+          .where(
+            Filter.or(
+              Filter('userId', isEqualTo: uid),
+              Filter('id_usuario', isEqualTo: uid),
+            ),
+          )
           .snapshots(),
       builder: (context, facSnap) {
         if (facSnap.connectionState == ConnectionState.waiting) {

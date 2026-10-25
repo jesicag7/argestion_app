@@ -312,6 +312,7 @@ class _EgresosScreenState extends State<EgresosScreen> {
                   flex: 4,
                   child: DropdownButtonFormField<String>(
                     initialValue: _categoriaSeleccionada,
+                    isExpanded: true,
                     dropdownColor: const Color(0xFFF8FAFC),
                     style: const TextStyle(
                       color: Color(0xFF0F172A),
@@ -319,7 +320,16 @@ class _EgresosScreenState extends State<EgresosScreen> {
                     ),
                     decoration: _inputStyle('Tipo', Icons.category_outlined),
                     items: _categorias
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                        .map(
+                          (c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(
+                              c,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        )
                         .toList(),
                     onChanged: (val) {
                       if (val != null) {

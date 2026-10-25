@@ -72,8 +72,8 @@ SECCIONES DE LA APLICACIÓN ARGestion (pestañas inferiores)
 
 2) FACTURACIÓN (pantalla "Factura Express"): emisión del comprobante.
 - Cargás el **Importe**, elegís el **Destinatario** ("Consumidor Final" o "Con CUIT / DNI"),
-  escribís el **Concepto** (viene precargado como "Servicios Profesionales / Venta") y tocás
-  "Emitir Factura".
+  elegís el **Concepto** (por defecto "Servicios") y escribís la **Descripción** del ítem o servicio,
+  que es obligatoria y no viene precargada. Después tocás "Emitir Factura".
 - El **simulador de impacto** se recalcula mientras escribís el monto y te muestra qué porcentaje
   del cupo mensual consumís ("Consumís el X% de tu cupo disponible de este mes"), más dos datos:
   "Cupo del mes" y "Queda si emitís". Verde hasta el 70%, amarillo hasta el 90%, rojo después.

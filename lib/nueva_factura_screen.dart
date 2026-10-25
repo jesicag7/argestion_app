@@ -93,9 +93,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
   bool _actualizandoClienteSeleccionado = false;
 
   // c) Detalle de la Operación y Cobro
-  final TextEditingController _descripcionController = TextEditingController(
-    text: 'Servicios Profesionales de Asesoría y Consultoría',
-  );
+  final TextEditingController _descripcionController = TextEditingController();
   final TextEditingController _montoController = TextEditingController();
   String _condicionVenta = 'Transferencia / Débito';
 
@@ -280,6 +278,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                             : '${cliente.razonSocialONombre} · '
                                   '${cliente.numeroDocumento}',
                         overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ),
                   )
@@ -609,17 +608,27 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
 
       // Mostrar diálogo de éxito con opciones de Compartir PDF y Ver Historial
       await _mostrarDialogoExito(facturaData);
+    } on ArcaFiscalException catch (e) {
+      _mostrarErrorEmision(e.message);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al emitir factura: $e'),
-          backgroundColor: const Color(0xFFEF4444),
-        ),
-      );
+      _mostrarErrorEmision('Error al emitir la factura: $e');
     } finally {
+      // Siempre se libera el estado de carga para que el botón vuelva a habilitarse.
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _mostrarErrorEmision(String mensaje) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(mensaje),
+          backgroundColor: const Color(0xFFEF4444),
+          duration: const Duration(seconds: 6),
+        ),
+      );
   }
 
   Future<void> _mostrarDialogoExito(Map<String, dynamic> facturaData) async {
@@ -1391,6 +1400,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                     style: const TextStyle(color: Color(0xFF0F172A)),
                     decoration: _inputDecoration(
                       labelText: 'Descripción del ítem o servicio prestado *',
+                      hintText: 'Ej. Servicios profesionales de consultoría',
                       prefixIcon: Icons.description_outlined,
                     ),
                     validator: (val) {
@@ -1566,12 +1576,20 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
     return DropdownButtonFormField<T>(
       key: key,
       initialValue: initialValue,
+      isExpanded: true,
       dropdownColor: const Color(0xFFFFFFFF),
       style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5),
       iconEnabledColor: const Color(0xFF059669),
       decoration: _inputDecoration(labelText: label),
       items: items.map((item) {
-        return DropdownMenuItem<T>(value: item, child: Text(item.toString()));
+        return DropdownMenuItem<T>(
+          value: item,
+          child: Text(
+            item.toString(),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        );
       }).toList(),
       onChanged: onChanged,
     );

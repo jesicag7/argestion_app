@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,6 +18,11 @@ class ArcaFiscalException implements Exception {
 }
 
 class ArcaFiscalService {
+  static const Duration tiempoMaximoRespuesta = Duration(seconds: 10);
+  static const String mensajeServidorNoDisponible =
+      'No se pudo conectar con el servidor fiscal. Verificá que el backend '
+      'esté ejecutándose en el puerto 3000.';
+
   ArcaFiscalService({
     http.Client? client,
     Uri? endpoint,
@@ -193,6 +199,8 @@ class ArcaFiscalService {
       if (comprobanteAsociado != null) 'CbtesAsoc': [comprobanteAsociado],
     };
 
+    final cuerpoJson = jsonEncode(payload);
+
     late http.Response response;
     try {
       response = await _client
@@ -203,12 +211,20 @@ class ArcaFiscalService {
               'Accept': 'application/json',
               'Authorization': 'Bearer $idToken',
             },
-            body: jsonEncode(payload),
+            body: cuerpoJson,
           )
-          .timeout(const Duration(seconds: 45));
-    } on Exception catch (error) {
-      throw ArcaFiscalException(
-        'No se pudo conectar con el backend fiscal: $error',
+          .timeout(tiempoMaximoRespuesta);
+    } on TimeoutException {
+      throw const ArcaFiscalException(
+        'El servidor fiscal no respondió en 10 segundos. Verificá que el '
+        'backend esté ejecutándose en el puerto 3000.',
+        code: 'NETWORK_TIMEOUT',
+      );
+    } catch (_) {
+      // Cualquier fallo al enviar la solicitud (SocketException, ClientException,
+      // servidor apagado o sin conexión) se trata como servidor no disponible.
+      throw const ArcaFiscalException(
+        mensajeServidorNoDisponible,
         code: 'NETWORK_ERROR',
       );
     }
@@ -222,7 +238,7 @@ class ArcaFiscalService {
       body = decoded;
     } on FormatException {
       throw ArcaFiscalException(
-        'El backend fiscal devolvió una respuesta inválida '
+        'El backend fiscal devolvió una respuesta inesperada '
         '(HTTP ${response.statusCode}).',
         code: 'INVALID_API_RESPONSE',
       );
@@ -236,15 +252,19 @@ class ArcaFiscalService {
         responseData['Errors'] ??
         responseData['observaciones'] ??
         responseData['Observaciones'];
+    if (response.statusCode != 200) {
+      throw ArcaFiscalException(
+        _extractErrorMessage(responseData, errors, response.statusCode),
+        code: 'HTTP_${response.statusCode}',
+      );
+    }
     final explicitSuccess =
         responseData['success'] == true ||
         responseData['exito'] == true ||
         responseData['resultado']?.toString().toUpperCase() == 'A' ||
         responseData['resultadoEmision']?.toString().toLowerCase() ==
             'aprobado';
-    if (response.statusCode < 200 ||
-        response.statusCode >= 300 ||
-        responseData['success'] == false ||
+    if (responseData['success'] == false ||
         responseData['exito'] == false ||
         responseData['resultado']?.toString().toUpperCase() == 'R' ||
         (errors is List && errors.isNotEmpty) ||

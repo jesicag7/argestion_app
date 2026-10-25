@@ -232,7 +232,12 @@ class _ReportesScreenState extends State<ReportesScreen> {
 
     final facturasStream = FirebaseFirestore.instance
         .collection('facturas')
-        .where('userId', isEqualTo: uid)
+        .where(
+          Filter.or(
+            Filter('userId', isEqualTo: uid),
+            Filter('id_usuario', isEqualTo: uid),
+          ),
+        )
         .snapshots();
     final gastosStream = FirebaseFirestore.instance
         .collection('gastos')

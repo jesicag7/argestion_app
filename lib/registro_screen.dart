@@ -237,6 +237,7 @@ class _RegistroScreenState extends State<RegistroScreen> {
 
                   DropdownButtonFormField<String>(
                     initialValue: _categoriaSeleccionada,
+                    isExpanded: true,
                     dropdownColor: const Color(0xFFFFFFFF),
                     style: const TextStyle(
                       color: Color(0xFF0F172A),
@@ -251,7 +252,11 @@ class _RegistroScreenState extends State<RegistroScreen> {
                             .map(
                               (cat) => DropdownMenuItem(
                                 value: cat,
-                                child: Text('Categoría $cat'),
+                                child: Text(
+                                  'Categoría $cat',
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
                               ),
                             )
                             .toList(),

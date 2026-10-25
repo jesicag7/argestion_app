@@ -77,7 +77,7 @@ class PdfInvoiceService {
                 '')
             .toString();
 
-    final nroFactura = (data['nro_factura'] ?? '0001-00000001').toString();
+    final nroFactura = (data['nro_factura'] ?? 'Sin número').toString();
     final fechaEmisionStr = _formatearFecha(data['fecha_emision']);
     final concepto = (data['concepto'] ?? 'Servicios').toString();
 
@@ -87,8 +87,7 @@ class PdfInvoiceService {
     final vtoPagoStr = _formatearFecha(data['vencimiento_pago']);
 
     // Emisor
-    final emisorNombre = (data['emisor_nombre'] ?? 'ARGestión Usuario')
-        .toString();
+    final emisorNombre = (data['emisor_nombre'] ?? 'Sin nombre').toString();
     final emisorCuit = (data['emisor_cuit'] ?? '').toString();
     final emisorDomicilio =
         (data['emisor_domicilio'] ?? 'Buenos Aires, Argentina').toString();
@@ -111,7 +110,7 @@ class PdfInvoiceService {
     final descripcionItem =
         (data['descripcion_item'] ??
                 data['descripcion'] ??
-                'Servicios Profesionales')
+                concepto)
             .toString();
     final double monto = (data['monto'] is num)
         ? (data['monto'] as num).toDouble()

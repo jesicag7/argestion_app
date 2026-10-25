@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 import 'models/factura_model.dart';
 import 'services/pdf_invoice_service.dart';
 import 'nueva_factura_screen.dart';
 
 class HistorialFacturasScreen extends StatelessWidget {
   const HistorialFacturasScreen({super.key});
+
+  static final NumberFormat _formatoMonto = NumberFormat.currency(
+    locale: 'es_AR',
+    symbol: '\$',
+    decimalDigits: 2,
+  );
 
   Future<void> _actualizarEstadoCobro(
     BuildContext context,
@@ -153,8 +160,10 @@ class HistorialFacturasScreen extends StatelessWidget {
                 stream: FirebaseFirestore.instance
                     .collection('facturas')
                     .where(
-                      'userId',
-                      isEqualTo: FirebaseAuth.instance.currentUser?.uid,
+                      Filter.or(
+                        Filter('userId', isEqualTo: currentUser.uid),
+                        Filter('id_usuario', isEqualTo: currentUser.uid),
+                      ),
                     )
                     .snapshots(),
                 builder: (context, snapshot) {
@@ -190,7 +199,7 @@ class HistorialFacturasScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 12),
                             const Text(
-                              'No tenés facturas emitidas todavía.',
+                              'Aún no has emitido facturas.',
                               style: TextStyle(
                                 color: Color(0xFF64748B),
                                 fontSize: 16,
@@ -405,7 +414,7 @@ class HistorialFacturasScreen extends StatelessWidget {
                                   FittedBox(
                                     fit: BoxFit.scaleDown,
                                     child: Text(
-                                      '\$${data['monto']}',
+                                      _formatoMonto.format(factura.monto),
                                       style: const TextStyle(
                                         color: Color(0xFF10B981),
                                         fontWeight: FontWeight.bold,
