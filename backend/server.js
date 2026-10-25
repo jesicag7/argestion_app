@@ -4,8 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cors = require('cors');
 const express = require('express');
-const { cert, getApps, initializeApp, applicationDefault } =
-  require('firebase-admin/app');
+const { cert, getApps, initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const {
   ArcaSoapClient,
@@ -153,21 +152,41 @@ function validatePayload(body) {
   };
 }
 
-function getFirebaseVerifier() {
+function buildFirebaseOptions(env) {
+  const projectId = env.FIREBASE_PROJECT_ID;
+  const serviceAccountPath = env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  const absolutePath = serviceAccountPath
+    ? path.resolve(process.cwd(), serviceAccountPath)
+    : null;
+  // verifyIdToken valida la firma con las claves públicas de Google y solo
+  // necesita el projectId. Las credenciales de servicio se usan si el archivo
+  // existe; si falta, no se fuerza un error de credenciales.
+  if (absolutePath && fs.existsSync(absolutePath)) {
+    return {
+      credential: cert(JSON.parse(fs.readFileSync(absolutePath, 'utf8'))),
+      projectId,
+    };
+  }
+  if (!projectId) {
+    console.error(
+      '[auth] FIREBASE_PROJECT_ID no está definido en backend/.env; ' +
+        'la verificación de sesiones Firebase fallará.',
+    );
+  } else if (absolutePath) {
+    console.warn(
+      `[auth] No se encontró ${serviceAccountPath}; se verifica el token ` +
+        'solo con FIREBASE_PROJECT_ID.',
+    );
+  }
+  return { projectId };
+}
+
+function getFirebaseVerifier(env = process.env) {
   if (!firebaseApp) {
     if (getApps().length > 0) {
       firebaseApp = getApps()[0];
     } else {
-      const projectId = process.env.FIREBASE_PROJECT_ID;
-      const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-      const credential = serviceAccountPath
-        ? cert(
-            JSON.parse(
-              fs.readFileSync(path.resolve(process.cwd(), serviceAccountPath), 'utf8'),
-            ),
-          )
-        : applicationDefault();
-      firebaseApp = initializeApp({ credential, projectId });
+      firebaseApp = initializeApp(buildFirebaseOptions(env));
     }
   }
   return (token) => getAuth(firebaseApp).verifyIdToken(token);
@@ -178,7 +197,7 @@ function errorResponse(res, status, message) {
 }
 
 function createApp({
-  verifyToken = (token) => getFirebaseVerifier()(token),
+  verifyToken = (token) => getFirebaseVerifier(env)(token),
   emit = emitirComprobante,
   env = process.env,
 } = {}) {
@@ -205,7 +224,11 @@ function createApp({
     }
     try {
       await verifyToken(tokenMatch[1]);
-    } catch {
+    } catch (error) {
+      console.error(
+        `[auth] verifyIdToken falló (${error?.code ?? 'sin código'}): ` +
+          `${error?.message ?? error}`,
+      );
       return errorResponse(res, 401, 'La sesión Firebase no es válida.');
     }
 

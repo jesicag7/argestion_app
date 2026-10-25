@@ -381,10 +381,15 @@ class ArcaFiscalService {
     dynamic errors,
     int statusCode,
   ) {
+    // 401 (sesión) y 5xx (fallas internas del backend) no son rechazos de ARCA;
+    // se muestra el mensaje tal cual para no inducir a error.
+    final esRechazoArca = statusCode != 401 && statusCode < 500;
     final directMessage =
         response['message'] ?? response['mensaje'] ?? response['error'];
     if (directMessage is String && directMessage.trim().isNotEmpty) {
-      return 'ARCA rechazó la factura: ${directMessage.trim()}';
+      return esRechazoArca
+          ? 'ARCA rechazó la factura: ${directMessage.trim()}'
+          : directMessage.trim();
     }
     final errorItems = errors is List
         ? errors
@@ -407,7 +412,9 @@ class ArcaFiscalService {
           })
           .where((message) => message.trim().isNotEmpty)
           .join('; ');
-      if (messages.isNotEmpty) return 'ARCA rechazó la factura: $messages';
+      if (messages.isNotEmpty) {
+        return esRechazoArca ? 'ARCA rechazó la factura: $messages' : messages;
+      }
     }
     return 'El backend fiscal rechazó la solicitud (HTTP $statusCode).';
   }
