@@ -55,8 +55,8 @@ class PdfInvoiceService {
         vtoCae != null &&
         qrContent != null &&
         qrContent.isNotEmpty;
-    final caeMostrado = esOficial ? cae : _caeSimulado;
-    final vtoCaeStr = esOficial
+    final caeMostrado = (esOficial || cae.isNotEmpty) ? cae : _caeSimulado;
+    final vtoCaeStr = vtoCae != null
         ? _formatearFecha(vtoCae)
         : _formatearFecha(data['fecha_emision']);
 

@@ -655,6 +655,8 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
         cuitEmisor: emisorCuit,
       );
       final numeroComprobante = emision['numeroComprobante'].toString();
+      final esSimulada =
+          emision['modoSimulacion'] == true || emision['simulada'] == true;
       final facturaAprobada = factura.copyWith(
         nroFactura: '$puntoVentaStr-$numeroComprobante',
         puntoVenta: emision['puntoVenta'].toString(),
@@ -667,7 +669,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
         modoHomologacion: emision['modoHomologacion'] == true,
       );
       final facturaData = facturaAprobada.toMap()
-        ..['created_at'] = FieldValue.serverTimestamp();
+        ..['created_at'] = FieldValue.serverTimestamp()
+        ..['modoSimulacion'] = esSimulada
+        ..['simulada'] = esSimulada;
 
       final facturas = FirebaseFirestore.instance.collection('facturas');
       final nuevaFactura = facturas.doc();
@@ -688,6 +692,30 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       widget.onFacturaEmitida?.call();
 
       if (!mounted) return;
+
+      if (esSimulada) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Factura emitida en modo simulación (backend no disponible)',
+                      style: TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Color(0xFFD97706),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 4),
+            ),
+          );
+      }
 
       // Mostrar diálogo de éxito con opciones de Compartir PDF y Ver Historial
       await _mostrarDialogoExito(facturaData);
@@ -743,20 +771,57 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                facturaData['modoHomologacion'] == true
+                facturaData['modoSimulacion'] == true ||
+                        facturaData['simulada'] == true
+                    ? 'Comprobante emitido (Modo Simulación)'
+                    : facturaData['modoHomologacion'] == true
                     ? 'Autorización en homologación'
                     : facturaData['esNotaCredito'] == true
                     ? '¡Nota de Crédito autorizada por ARCA!'
                     : '¡Factura autorizada por ARCA!',
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   color: Color(0xFF0F172A),
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 10),
-              if (facturaData['modoHomologacion'] == true) ...[
+              if (facturaData['modoSimulacion'] == true ||
+                  facturaData['simulada'] == true) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Color(0xFFB45309),
+                        size: 16,
+                      ),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Factura emitida en modo simulación (backend no disponible)',
+                          style: TextStyle(
+                            color: Color(0xFF92400E),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ] else if (facturaData['modoHomologacion'] == true) ...[
                 const Text(
                   'Este comprobante de prueba no tiene validez fiscal.',
                   textAlign: TextAlign.center,
@@ -801,8 +866,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (facturaData['modoHomologacion'] != true)
-                  ElevatedButton.icon(
+                ElevatedButton.icon(
                     onPressed: () async {
                       try {
                         await PdfInvoiceService.shareInvoicePdf(facturaData);
