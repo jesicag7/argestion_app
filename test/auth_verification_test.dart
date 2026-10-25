@@ -55,6 +55,14 @@ void main() {
         AuthVerificationService.mensajeCuentaNoVerificada,
         'Tu cuenta aún no fue verificada. Revisa el correo que te enviamos.',
       );
+      expect(
+        AuthVerificationService.tituloDialogoVerificacion,
+        'Verificá tu correo electrónico',
+      );
+      expect(
+        AuthVerificationService.mensajeDialogoVerificacion,
+        'Te enviamos un enlace de validación a tu casilla. Por favor revisá tu Bandeja de entrada y también la carpeta de Correo no deseado / Spam antes de iniciar sesión.',
+      );
     });
 
     test('sendEmailVerification delega la llamada en el User', () async {
@@ -78,4 +86,3 @@ void main() {
     });
   });
 }
-

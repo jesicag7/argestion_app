@@ -12,6 +12,48 @@ import 'services/arca_service.dart';
 import 'services/cliente_service.dart';
 import 'models/monotributo_category.dart';
 
+/// Formateador de texto que restringe la entrada a dígitos numéricos y activa
+/// una notificación inmediata cuando el usuario intenta tipear letras o caracteres especiales.
+class DigitosConAdvertenciaInputFormatter extends TextInputFormatter {
+  final VoidCallback onCaracterInvalido;
+
+  const DigitosConAdvertenciaInputFormatter({
+    required this.onCaracterInvalido,
+  });
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (oldValue.text == newValue.text) {
+      return newValue;
+    }
+
+    if (RegExp(r'[^\d]').hasMatch(newValue.text)) {
+      onCaracterInvalido();
+      final cleanText = newValue.text.replaceAll(RegExp(r'\D'), '');
+
+      int digitsBeforeCursor = 0;
+      final cursor = newValue.selection.end.clamp(0, newValue.text.length);
+      for (int i = 0; i < cursor; i++) {
+        if (RegExp(r'\d').hasMatch(newValue.text[i])) {
+          digitsBeforeCursor++;
+        }
+      }
+
+      return TextEditingValue(
+        text: cleanText,
+        selection: TextSelection.collapsed(
+          offset: digitsBeforeCursor.clamp(0, cleanText.length),
+        ),
+      );
+    }
+
+    return newValue;
+  }
+}
+
 class NuevaFacturaScreen extends StatefulWidget {
   final VoidCallback? onFacturaEmitida;
   final VoidCallback? onVolverAlInicio;
@@ -91,6 +133,46 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
   String? _clienteIdSeleccionado;
   bool _guardarEnAgenda = false;
   bool _actualizandoClienteSeleccionado = false;
+  String? _advertenciaFormatoDoc;
+  Timer? _advertenciaTimer;
+
+  void _mostrarAdvertenciaCaracterInvalido() {
+    _advertenciaTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _advertenciaFormatoDoc =
+          'Solo se permiten números (sin letras ni caracteres especiales)';
+    });
+
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Solo se permiten números (sin letras ni caracteres especiales)',
+                style: TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Color(0xFFDC2626),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    _advertenciaTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() {
+          _advertenciaFormatoDoc = null;
+        });
+      }
+    });
+  }
 
   // c) Detalle de la Operación y Cobro
   final TextEditingController _descripcionController = TextEditingController();
@@ -352,6 +434,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
 
   @override
   void dispose() {
+    _advertenciaTimer?.cancel();
     _userSub?.cancel();
     _facturasSub?.cancel();
     _puntoVentaController.dispose();
@@ -1305,7 +1388,10 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                           controller: _nroDocController,
                           keyboardType: TextInputType.number,
                           inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
+                            DigitosConAdvertenciaInputFormatter(
+                              onCaracterInvalido:
+                                  _mostrarAdvertenciaCaracterInvalido,
+                            ),
                             LengthLimitingTextInputFormatter(11),
                           ],
                           autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -1318,12 +1404,23 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                             hintText: _tipoDocCliente == 'CUIT'
                                 ? 'Ej. 20111111112'
                                 : 'Ej. 38491823',
+                            helperText: _advertenciaFormatoDoc,
+                            helperStyle: const TextStyle(
+                              color: Color(0xFFDC2626),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            errorText: _advertenciaFormatoDoc,
                           ),
-                          validator: (val) =>
-                              NuevaFacturaScreen.validarCuitCliente(
-                                val,
-                                tipoDoc: _tipoDocCliente,
-                              ),
+                          validator: (val) {
+                            if (_advertenciaFormatoDoc != null) {
+                              return _advertenciaFormatoDoc;
+                            }
+                            return NuevaFacturaScreen.validarCuitCliente(
+                              val,
+                              tipoDoc: _tipoDocCliente,
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -1599,6 +1696,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
     required String labelText,
     IconData? prefixIcon,
     String? hintText,
+    String? helperText,
+    TextStyle? helperStyle,
+    String? errorText,
   }) {
     return InputDecoration(
       labelText: labelText,
@@ -1612,6 +1712,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       fillColor: const Color(0xFFF8FAFC),
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      helperText: helperText,
+      helperStyle: helperStyle,
+      errorText: errorText,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFFE2E8F0)),

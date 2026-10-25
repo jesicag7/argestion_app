@@ -90,24 +90,78 @@ class _RegistroScreenState extends State<RegistroScreen> {
       await FirebaseAuth.instance.signOut();
 
       if (mounted) {
-        // c. Mostrar aviso informativo claro
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              AuthVerificationService.mensajeVerificacionEnviada,
-              style: TextStyle(color: Colors.white),
-            ),
-            backgroundColor: Color(0xFF059669),
-            duration: Duration(seconds: 6),
-          ),
+        // c. Mostrar diálogo modal centralizado de verificación de correo
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              icon: const Icon(
+                Icons.mark_email_read_outlined,
+                color: Color(0xFF059669),
+                size: 48,
+              ),
+              title: const Text(
+                AuthVerificationService.tituloDialogoVerificacion,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F172A),
+                  fontSize: 18,
+                ),
+              ),
+              content: const Text(
+                AuthVerificationService.mensajeDialogoVerificacion,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF475569),
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF059669),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      elevation: 0,
+                    ),
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text(
+                      'Ir a iniciar sesión',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         );
 
         // d. Redirigir a la pantalla de Login (login_screen.dart)
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (route) => false,
-        );
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+            (route) => false,
+          );
+        }
       }
     } on FirebaseAuthException catch (e) {
       String mensajeError =

@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argestion_app/nueva_factura_screen.dart';
 
@@ -72,5 +73,94 @@ void main() {
       );
     });
   });
-}
 
+  group('DigitosConAdvertenciaInputFormatter', () {
+    test('permite entrada de dígitos numéricos válidos sin activar advertencia', () {
+      bool advertenciaLlamada = false;
+      final formatter = DigitosConAdvertenciaInputFormatter(
+        onCaracterInvalido: () {
+          advertenciaLlamada = true;
+        },
+      );
+
+      const oldValue = TextEditingValue(text: '20');
+      const newValue = TextEditingValue(
+        text: '201',
+        selection: TextSelection.collapsed(offset: 3),
+      );
+
+      final resultado = formatter.formatEditUpdate(oldValue, newValue);
+
+      expect(resultado.text, '201');
+      expect(advertenciaLlamada, isFalse);
+    });
+
+    test('bloquea letras y dispara callback de advertencia', () {
+      bool advertenciaLlamada = false;
+      final formatter = DigitosConAdvertenciaInputFormatter(
+        onCaracterInvalido: () {
+          advertenciaLlamada = true;
+        },
+      );
+
+      const oldValue = TextEditingValue(
+        text: '20',
+        selection: TextSelection.collapsed(offset: 2),
+      );
+      const newValue = TextEditingValue(
+        text: '20a',
+        selection: TextSelection.collapsed(offset: 3),
+      );
+
+      final resultado = formatter.formatEditUpdate(oldValue, newValue);
+
+      expect(resultado.text, '20');
+      expect(resultado.selection.end, 2);
+      expect(advertenciaLlamada, isTrue);
+    });
+
+    test('bloquea caracteres especiales y símbolos, limpiando el texto pegado', () {
+      bool advertenciaLlamada = false;
+      final formatter = DigitosConAdvertenciaInputFormatter(
+        onCaracterInvalido: () {
+          advertenciaLlamada = true;
+        },
+      );
+
+      const oldValue = TextEditingValue.empty;
+      const newValue = TextEditingValue(
+        text: '20-11111111-2',
+        selection: TextSelection.collapsed(offset: 13),
+      );
+
+      final resultado = formatter.formatEditUpdate(oldValue, newValue);
+
+      expect(resultado.text, '20111111112');
+      expect(resultado.selection.end, 11);
+      expect(advertenciaLlamada, isTrue);
+    });
+
+    test('no dispara advertencia cuando el usuario borra texto', () {
+      bool advertenciaLlamada = false;
+      final formatter = DigitosConAdvertenciaInputFormatter(
+        onCaracterInvalido: () {
+          advertenciaLlamada = true;
+        },
+      );
+
+      const oldValue = TextEditingValue(
+        text: '201',
+        selection: TextSelection.collapsed(offset: 3),
+      );
+      const newValue = TextEditingValue(
+        text: '20',
+        selection: TextSelection.collapsed(offset: 2),
+      );
+
+      final resultado = formatter.formatEditUpdate(oldValue, newValue);
+
+      expect(resultado.text, '20');
+      expect(advertenciaLlamada, isFalse);
+    });
+  });
+}
