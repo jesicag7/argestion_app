@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:argestion_app/nueva_factura_screen.dart';
+import 'package:argestion_app/dashboard_screen.dart';
 
 void main() {
   group('NuevaFacturaScreen.validarCuitCliente', () {
@@ -161,6 +162,33 @@ void main() {
 
       expect(resultado.text, '20');
       expect(advertenciaLlamada, isFalse);
+    });
+  });
+
+  group('DashboardScreen.formatearCuit', () {
+    test('formatea correctamente CUIT de 11 dígitos numéricos', () {
+      expect(
+        DashboardScreen.formatearCuit('20111111112'),
+        '20-11111111-2',
+      );
+      expect(
+        DashboardScreen.formatearCuit('27329642335'),
+        '27-32964233-5',
+      );
+      expect(
+        DashboardScreen.formatearCuit('20-11111111-2'),
+        '20-11111111-2',
+      );
+    });
+
+    test('retorna "No registrado" para valores nulos o vacíos', () {
+      expect(DashboardScreen.formatearCuit(null), 'No registrado');
+      expect(DashboardScreen.formatearCuit(''), 'No registrado');
+      expect(DashboardScreen.formatearCuit('   '), 'No registrado');
+    });
+
+    test('retorna valor limpio cuando no tiene exactamente 11 dígitos', () {
+      expect(DashboardScreen.formatearCuit('12345'), '12345');
     });
   });
 }

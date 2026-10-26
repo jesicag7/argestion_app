@@ -530,7 +530,8 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
     }
   }
 
-  Future<void> _emitirFactura() async {
+  /// Paso 1: Valida el formulario e inicia la previsualización modal antes de emitir.
+  Future<void> _solicitarEmisionFactura() async {
     if (!_formKey.currentState!.validate()) return;
     final facturaOriginal = widget.comprobanteAAnular;
     if (_tipoComprobante == 'Nota de Crédito C' && facturaOriginal == null) {
@@ -556,27 +557,439 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       return;
     }
 
+    final double monto =
+        double.tryParse(_montoController.text.replaceAll(',', '.')) ?? 0.0;
+    if (monto <= 0) {
+      _mostrarErrorEmision('El importe total debe ser mayor a 0');
+      return;
+    }
+    if (facturaOriginal != null &&
+        monto.toStringAsFixed(2) !=
+            facturaOriginal.monto.toStringAsFixed(2)) {
+      _mostrarErrorEmision(
+        'El importe de la Nota de Crédito debe coincidir con el total de la factura original.',
+      );
+      return;
+    }
+    if (facturaOriginal != null && facturaOriginal.id == null) {
+      _mostrarErrorEmision(
+        'No se pudo identificar la factura original para vincular la anulación.',
+      );
+      return;
+    }
+
+    // Proyección del impacto en el cupo mensual del monotributo
+    final categoria = _obtenerCategoriaUsuario();
+    final tope =
+        MonotributoCategory.annualIncomeLimits[categoria] ??
+        MonotributoCategory.annualIncomeLimits['A']!;
+    final ahora = DateTime.now();
+    final facturado = _sumarUltimos12Meses(_facturasDocs, ahora);
+    final saldo = (tope - facturado).clamp(0.0, double.infinity);
+    final mesesRestantes = (12 - ahora.month + 1).clamp(1, 12);
+    final cupoMes = saldo / mesesRestantes;
+    final pctConsumo = cupoMes > 0 ? (monto / cupoMes) : 0.0;
+    final cupoRestante = (cupoMes - monto).clamp(0.0, double.infinity);
+
+    final rawDocument = _nroDocController.text.trim();
+    final cuitCliente = rawDocument.isEmpty ? 'Consumidor Final' : rawDocument;
+    final nombreCliente = _nombreClienteController.text.trim();
+    final descripcion = _descripcionController.text.trim().isNotEmpty
+        ? _descripcionController.text.trim()
+        : _concepto;
+
+    // Despliega el modal interactivo de previsualización y confirmación
+    final confirmar = await _mostrarDialogoConfirmacion(
+      monto: monto,
+      cuitCliente: cuitCliente,
+      tipoDocCliente: _tipoDocCliente,
+      nombreCliente: nombreCliente,
+      concepto: _concepto,
+      descripcion: descripcion,
+      condicionVenta: _condicionVenta,
+      categoria: categoria,
+      cupoMes: cupoMes,
+      pctConsumo: pctConsumo,
+      cupoRestante: cupoRestante,
+    );
+
+    if (confirmar == true && mounted) {
+      await _ejecutarEmisionFiscal(monto);
+    }
+  }
+
+  /// Entrada directa compatible con los llamados existentes
+  Future<void> _emitirFactura() => _solicitarEmisionFactura();
+
+  /// Despliega el modal centrado de confirmación y vista previa antes de emitir.
+  Future<bool?> _mostrarDialogoConfirmacion({
+    required double monto,
+    required String cuitCliente,
+    required String tipoDocCliente,
+    required String nombreCliente,
+    required String concepto,
+    required String descripcion,
+    required String condicionVenta,
+    required String categoria,
+    required double cupoMes,
+    required double pctConsumo,
+    required double cupoRestante,
+  }) {
+    final colorConsumo = pctConsumo < 0.7
+        ? const Color(0xFF10B981)
+        : pctConsumo < 0.9
+        ? const Color(0xFFF59E0B)
+        : const Color(0xFFDC2626);
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF059669).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.receipt_long_rounded,
+                  color: Color(0xFF059669),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Confirmar Emisión de Factura',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Tarjeta resumen con diseño prolijo
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Importe Total a Facturar ($ ARS) destacado en negrita
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 12,
+                          horizontal: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'Importe Total a Facturar',
+                              style: TextStyle(
+                                color: Color(0xFF065F46),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _currencyFormat.format(monto),
+                              style: const TextStyle(
+                                color: Color(0xFF0F172A),
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // CUIT / CUIL y Nombre del Cliente
+                      _buildResumenFila(
+                        icon: Icons.person_outline_rounded,
+                        label: 'Cliente / Receptor',
+                        valor: nombreCliente.isNotEmpty
+                            ? nombreCliente
+                            : 'Consumidor Final',
+                        subvalor: cuitCliente.isNotEmpty &&
+                                cuitCliente != 'Consumidor Final'
+                            ? '$tipoDocCliente: $cuitCliente'
+                            : 'Consumidor Final',
+                      ),
+                      const Divider(height: 16, color: Color(0xFFE2E8F0)),
+
+                      // Concepto / Descripción
+                      _buildResumenFila(
+                        icon: Icons.work_outline_rounded,
+                        label: 'Concepto / Descripción',
+                        valor: descripcion.isNotEmpty
+                            ? descripcion
+                            : concepto,
+                        subvalor: descripcion.isNotEmpty &&
+                                descripcion != concepto
+                            ? 'Tipo: $concepto'
+                            : null,
+                      ),
+                      const Divider(height: 16, color: Color(0xFFE2E8F0)),
+
+                      // Condición de venta / Medio de pago
+                      _buildResumenFila(
+                        icon: Icons.payments_outlined,
+                        label: 'Condición de Venta / Pago',
+                        valor: condicionVenta,
+                      ),
+                      const Divider(height: 16, color: Color(0xFFE2E8F0)),
+
+                      // Impacto proyectado en el cupo mensual del monotributo
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.analytics_outlined,
+                                size: 16,
+                                color: Color(0xFF64748B),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Impacto en Cupo Mensual (Cat. $categoria)',
+                                style: const TextStyle(
+                                  color: Color(0xFF64748B),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Consume ${(pctConsumo * 100).clamp(0, 100).toStringAsFixed(1)}% del cupo',
+                                style: TextStyle(
+                                  color: colorConsumo,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                'Queda: ${_currencyFormat.format(cupoRestante)}',
+                                style: const TextStyle(
+                                  color: Color(0xFF0F172A),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: pctConsumo.clamp(0.0, 1.0),
+                              minHeight: 6,
+                              backgroundColor: const Color(0xFFE2E8F0),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(colorConsumo),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Cupo disponible del mes: ${_currencyFormat.format(cupoMes)}',
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Leyenda de advertencia fiscal sutil
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFECACA)),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: Color(0xFFDC2626),
+                        size: 16,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Una vez emitida la factura, solo podrá anularse mediante una Nota de Crédito.',
+                          style: TextStyle(
+                            color: Color(0xFFB91C1C),
+                            fontSize: 11,
+                            height: 1.35,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(dialogCtx, false),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Volver / Corregir',
+                      style: TextStyle(
+                        color: Color(0xFF475569),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(dialogCtx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF059669),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Confirmar y Emitir',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildResumenFila({
+    required IconData icon,
+    required String label,
+    required String valor,
+    String? subvalor,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: const Color(0xFF64748B)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                valor,
+                style: const TextStyle(
+                  color: Color(0xFF0F172A),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (subvalor != null && subvalor.isNotEmpty) ...[
+                const SizedBox(height: 1),
+                Text(
+                  subvalor,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Paso 2: Ejecuta la emisión fiscal propiamente dicha tras la confirmación.
+  Future<void> _ejecutarEmisionFiscal(double monto) async {
+    final facturaOriginal = widget.comprobanteAAnular;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _mostrarErrorEmision('Iniciá sesión para emitir comprobantes.');
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      final double monto =
-          double.tryParse(_montoController.text.replaceAll(',', '.')) ?? 0.0;
-      if (monto <= 0) {
-        throw Exception('El importe total debe ser mayor a 0');
-      }
-      if (facturaOriginal != null &&
-          monto.toStringAsFixed(2) !=
-              facturaOriginal.monto.toStringAsFixed(2)) {
-        throw Exception(
-          'El importe de la Nota de Crédito debe coincidir con el total de la factura original.',
-        );
-      }
-      if (facturaOriginal != null && facturaOriginal.id == null) {
-        throw Exception(
-          'No se pudo identificar la factura original para vincular la anulación.',
-        );
-      }
-
       final userDoc = await FirebaseFirestore.instance
           .collection('usuarios')
           .doc(user.uid)

@@ -40,6 +40,16 @@ class DashboardScreen extends StatelessWidget {
     return 'Usuario';
   }
 
+  /// Formatea un CUIT numérico al formato estándar 20-XXXXXXXX-X si tiene 11 dígitos.
+  static String formatearCuit(String? cuit) {
+    if (cuit == null || cuit.trim().isEmpty) return 'No registrado';
+    final digits = cuit.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 11) {
+      return '${digits.substring(0, 2)}-${digits.substring(2, 10)}-${digits.substring(10)}';
+    }
+    return cuit.trim();
+  }
+
   String _normalizarCategoria(String? valor) {
     if (valor == null || valor.trim().isEmpty) return 'A';
     final limpio = valor.trim().replaceAll(
@@ -1154,37 +1164,29 @@ class DashboardScreen extends StatelessWidget {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 18),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: Column(
-                        children: [
-                          _buildPerfilRow(
-                            icon: Icons.category_rounded,
-                            iconColor: const Color(0xFF059669),
-                            label: 'Categoría Monotributo',
-                            value: 'Categoría $categoria',
-                          ),
-                          const Divider(color: Color(0xFFFFFFFF), height: 16),
-                          _buildPerfilRow(
-                            icon: Icons.badge_outlined,
-                            iconColor: const Color(0xFF059669),
-                            label: 'CUIT / Identificación',
-                            value: cuit,
-                          ),
-                          const Divider(color: Color(0xFFFFFFFF), height: 16),
-                          _buildPerfilRow(
-                            icon: Icons.mail_outline_rounded,
-                            iconColor: const Color(0xFF38BDF8),
-                            label: 'Correo Electrónico',
-                            value: email,
-                          ),
-                        ],
-                      ),
+                    Column(
+                      children: [
+                        _buildPerfilRow(
+                          icon: Icons.category_rounded,
+                          iconColor: const Color(0xFF059669),
+                          label: 'Categoría Monotributo',
+                          value: 'Categoría $categoria',
+                        ),
+                        const SizedBox(height: 10),
+                        _buildPerfilRow(
+                          icon: Icons.badge_outlined,
+                          iconColor: const Color(0xFF059669),
+                          label: 'CUIT / Identificación',
+                          value: formatearCuit(cuit),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildPerfilRow(
+                          icon: Icons.mail_outline_rounded,
+                          iconColor: const Color(0xFF059669),
+                          label: 'Correo Electrónico',
+                          value: email,
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
@@ -1192,16 +1194,21 @@ class DashboardScreen extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: () => Navigator.of(dialogCtx).pop(),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFF8FAFC),
+                          backgroundColor: const Color(0xFFF1F5F9),
                           foregroundColor: const Color(0xFF0F172A),
+                          elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
+                            side: const BorderSide(color: Color(0xFFE2E8F0)),
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
                         child: const Text(
                           'Cerrar',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ),
@@ -1217,34 +1224,56 @@ class DashboardScreen extends StatelessWidget {
 
   Widget _buildPerfilRow({
     required IconData icon,
-    required Color iconColor,
+    Color iconColor = const Color(0xFF059669),
     required String label,
     required String value,
   }) {
-    return Row(
-      children: [
-        Icon(icon, color: iconColor, size: 18),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
-              ),
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
           ),
-        ),
-      ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Color(0xFF1E293B),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
