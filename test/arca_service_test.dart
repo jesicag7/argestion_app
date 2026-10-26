@@ -3,9 +3,27 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:argestion_app/services/arca_service.dart';
 import 'package:argestion_app/models/factura_model.dart';
+
+class FakeUser extends Fake implements User {
+  @override
+  String get uid => 'test_user_id';
+
+  @override
+  Future<String> getIdToken([bool forceRefresh = false]) async => 'mock_token_123';
+}
+
+class FakeFirebaseAuth extends Fake implements FirebaseAuth {
+  final User? _user;
+
+  FakeFirebaseAuth([this._user]);
+
+  @override
+  User? get currentUser => _user;
+}
 
 class ThrowingClient extends http.BaseClient {
   final Exception errorToThrow;
@@ -195,6 +213,71 @@ void main() {
       expect(emision['resultadoEmision'], 'Aprobado');
       expect(emision['modoSimulacion'], isTrue);
       expect(emision['cae'], matches(RegExp(r'^\d{14}$')));
+    });
+
+    test('resuelve timeout de 3 segundos para localhost y 10 para servidores remotos', () {
+      expect(
+        ArcaFiscalService.resolverTimeout(Uri.parse('http://localhost:3000/api')),
+        const Duration(seconds: 3),
+      );
+      expect(
+        ArcaFiscalService.resolverTimeout(Uri.parse('http://127.0.0.1:3000/api')),
+        const Duration(seconds: 3),
+      );
+      expect(
+        ArcaFiscalService.resolverTimeout(Uri.parse('http://10.0.2.2:3000/api')),
+        const Duration(seconds: 3),
+      );
+      expect(
+        ArcaFiscalService.resolverTimeout(Uri.parse('https://api.arca.gob.ar/ws')),
+        const Duration(seconds: 10),
+      );
+      expect(
+        ArcaFiscalService.esEndpointLocal(Uri.parse('http://localhost:3000')),
+        isTrue,
+      );
+      expect(
+        ArcaFiscalService.esEndpointLocal(Uri.parse('https://api.arca.gob.ar')),
+        isFalse,
+      );
+    });
+
+    test('emitirFacturaSimulada genera factura reglamentaria directamente', () async {
+      final service = ArcaFiscalService();
+      final factura = crearFacturaPrueba();
+      final emision = await service.emitirFacturaSimulada(
+        factura: factura,
+        puntoVenta: '0002',
+        cuitEmisor: '20111111112',
+      );
+
+      expect(emision['resultadoEmision'], 'Aprobado');
+      expect(emision['modoSimulacion'], isTrue);
+      expect(emision['cae'].toString().length, 14);
+      expect(emision['puntoVenta'], '0002');
+      expect(emision['mensajeAviso'], ArcaFiscalService.mensajeModoSimulacion);
+    });
+
+    test('lanza ArcaFiscalException si permitirSimulacionFallback es false y hay timeout', () async {
+      final client = ThrowingClient(TimeoutException('Timeout'));
+      final fakeAuth = FakeFirebaseAuth(FakeUser());
+      final service = ArcaFiscalService(
+        client: client,
+        endpoint: Uri.parse('http://localhost:3000/api/emitir-comprobante'),
+        modoHomologacion: true,
+        permitirSimulacionFallback: false,
+        firebaseAuth: fakeAuth,
+      );
+
+      final factura = crearFacturaPrueba();
+      expect(
+        () => service.emitirFactura(
+          factura: factura,
+          puntoVenta: '0001',
+          cuitEmisor: '20111111112',
+        ),
+        throwsA(isA<ArcaFiscalException>().having((e) => e.code, 'code', 'NETWORK_TIMEOUT')),
+      );
     });
   });
 }

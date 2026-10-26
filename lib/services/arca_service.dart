@@ -20,6 +20,9 @@ class ArcaFiscalException implements Exception {
 
 class ArcaFiscalService {
   static const Duration tiempoMaximoRespuesta = Duration(seconds: 10);
+  static const Duration tiempoMaximoRespuestaLocal = Duration(seconds: 3);
+  static const Duration timeoutEstandar = Duration(seconds: 10);
+  static const Duration timeoutLocalhost = Duration(seconds: 3);
   static const String mensajeServidorNoDisponible =
       'No se pudo conectar con el servidor fiscal. Verificá que el backend '
       'esté ejecutándose en el puerto 3000.';
@@ -72,13 +75,29 @@ class ArcaFiscalService {
     return '74$base$seq';
   }
 
-  bool _debeUsarSimulacionFallback(Uri? endpoint) {
-    if (!permitirSimulacionFallback) return false;
+  /// Determina si un endpoint apunta a localhost o al entorno local de desarrollo.
+  static bool esEndpointLocal(Uri? endpoint) {
     if (endpoint == null) return true;
-    final isLocal = endpoint.host == 'localhost' ||
-        endpoint.host == '127.0.0.1' ||
+    final host = endpoint.host.toLowerCase();
+    return host == 'localhost' ||
+        host == '127.0.0.1' ||
+        host == '10.0.2.2' ||
+        host == '0.0.0.0' ||
         endpoint.port == 3000;
-    return isLocal || modoHomologacion || kDebugMode;
+  }
+
+  /// Resuelve el timeout adecuado: 3 segundos para endpoints locales (evita cuelgues en teléfonos)
+  /// y 10 segundos para servidores remotos en la nube.
+  static Duration resolverTimeout(Uri? endpoint) {
+    if (esEndpointLocal(endpoint)) {
+      return timeoutLocalhost;
+    }
+    return timeoutEstandar;
+  }
+
+  bool _debeUsarSimulacionFallback([Uri? endpoint]) {
+    if (!permitirSimulacionFallback) return false;
+    return true;
   }
 
   Future<int> _resolverSiguienteNumeroComprobante({
@@ -240,13 +259,22 @@ class ArcaFiscalService {
     required String cuitEmisor,
   }) async {
     final endpoint = _endpoint;
+    final esLocal = esEndpointLocal(endpoint);
     if (endpoint == null ||
         !endpoint.hasAuthority ||
         (endpoint.scheme != 'https' &&
             !(modoHomologacion &&
                 endpoint.scheme == 'http' &&
-                (endpoint.host == 'localhost' ||
+                (esLocal ||
+                    endpoint.host == 'localhost' ||
                     endpoint.host == '127.0.0.1')))) {
+      if (_debeUsarSimulacionFallback(endpoint)) {
+        return emitirFacturaSimulada(
+          factura: factura,
+          puntoVenta: puntoVenta,
+          cuitEmisor: cuitEmisor,
+        );
+      }
       throw const ArcaFiscalException(
         'La API fiscal no está configurada con una URL HTTPS válida. '
         'Definí ARCA_API_URL con la URL HTTPS del backend fiscal.',
@@ -364,6 +392,7 @@ class ArcaFiscalService {
     final cuerpoJson = jsonEncode(payload);
 
     late http.Response response;
+    final timeout = resolverTimeout(endpoint);
     try {
       response = await _client
           .post(
@@ -375,7 +404,7 @@ class ArcaFiscalService {
             },
             body: cuerpoJson,
           )
-          .timeout(tiempoMaximoRespuesta);
+          .timeout(timeout);
     } on TimeoutException {
       if (_debeUsarSimulacionFallback(endpoint)) {
         return _generarRespuestaSimulada(
@@ -388,8 +417,9 @@ class ArcaFiscalService {
           userId: user?.uid ?? factura.idUsuario,
         );
       }
-      throw const ArcaFiscalException(
-        'El servidor fiscal no respondió en 10 segundos. Verificá que el '
+      final seg = timeout.inSeconds;
+      throw ArcaFiscalException(
+        'El servidor fiscal no respondió en $seg segundos. Verificá que el '
         'backend esté ejecutándose en el puerto 3000.',
         code: 'NETWORK_TIMEOUT',
       );
@@ -413,7 +443,8 @@ class ArcaFiscalService {
       );
     }
 
-    if ((response.statusCode == 502 ||
+    if ((response.statusCode == 500 ||
+            response.statusCode == 502 ||
             response.statusCode == 503 ||
             response.statusCode == 504) &&
         _debeUsarSimulacionFallback(endpoint)) {
@@ -698,6 +729,42 @@ class ArcaFiscalService {
       return DateTime.tryParse(normalized);
     }
     return null;
+  }
+
+  /// Emite directamente una factura simulada reglamentaria sin realizar llamadas de red.
+  Future<Map<String, dynamic>> emitirFacturaSimulada({
+    required FacturaModel factura,
+    required String puntoVenta,
+    required String cuitEmisor,
+  }) async {
+    final normalizedCuit = resolverCuitEmisor(cuitEmisor);
+    final puntoVentaNumber = int.tryParse(puntoVenta) ?? 1;
+    final receptorDoc = factura.tipoDocumentoCliente == 99
+        ? 0
+        : int.tryParse(_onlyDigits(factura.cuitCliente)) ?? 0;
+    final tipoComprobante = _getTipoComprobanteCode(factura.tipoComprobante);
+    final fechaEmision = _formatDate(factura.fechaEmision);
+
+    User? user;
+    try {
+      if (_firebaseAuth != null) {
+        user = _firebaseAuth.currentUser;
+      } else {
+        user = FirebaseAuth.instance.currentUser;
+      }
+    } catch (_) {
+      user = null;
+    }
+
+    return _generarRespuestaSimulada(
+      factura: factura,
+      puntoVentaNumber: puntoVentaNumber,
+      normalizedCuit: normalizedCuit,
+      tipoComprobante: tipoComprobante,
+      receptorDoc: receptorDoc,
+      fechaEmision: fechaEmision,
+      userId: user?.uid ?? factura.idUsuario,
+    );
   }
 
   void close() => _client.close();

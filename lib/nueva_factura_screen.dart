@@ -1062,76 +1062,37 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
         emisorCuit: emisorCuit,
         emisorDomicilio: emisorDomicilio,
       );
-      final emision = await _arcaFiscalService.emitirFactura(
-        factura: factura,
-        puntoVenta: puntoVentaStr,
-        cuitEmisor: emisorCuit,
-      );
-      final numeroComprobante = emision['numeroComprobante'].toString();
-      final esSimulada =
-          emision['modoSimulacion'] == true || emision['simulada'] == true;
-      final facturaAprobada = factura.copyWith(
-        nroFactura: '$puntoVentaStr-$numeroComprobante',
-        puntoVenta: emision['puntoVenta'].toString(),
-        numeroComprobante: numeroComprobante,
-        cae: emision['cae'].toString(),
-        fechaVtoCae: DateTime.parse(emision['fechaVtoCae'].toString()),
-        resultadoEmision: 'Aprobado',
-        qrUrl: emision['qrUrl']?.toString(),
-        qrData: emision['qrData']?.toString(),
-        modoHomologacion: emision['modoHomologacion'] == true,
-      );
-      final facturaData = facturaAprobada.toMap()
-        ..['created_at'] = FieldValue.serverTimestamp()
-        ..['modoSimulacion'] = esSimulada
-        ..['simulada'] = esSimulada;
-
-      final facturas = FirebaseFirestore.instance.collection('facturas');
-      final nuevaFactura = facturas.doc();
-      final batch = FirebaseFirestore.instance.batch()
-        ..set(nuevaFactura, facturaData);
-      if (facturaOriginal != null) {
-        batch.update(facturas.doc(facturaOriginal.id), {
-          'anulada': true,
-          'es_anulada': true,
-          'anuladaPorNcId': nuevaFactura.id,
-          'anulada_por_nc_id': nuevaFactura.id,
-          'anuladaPorNcNumero': facturaAprobada.nroFactura,
-          'anulada_por_nc_numero': facturaAprobada.nroFactura,
-        });
-      }
-      await batch.commit();
-
-      widget.onFacturaEmitida?.call();
-
-      if (!mounted) return;
-
-      if (esSimulada) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.white, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Factura emitida en modo simulación (backend no disponible)',
-                      style: TextStyle(color: Colors.white, fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: Color(0xFFD97706),
-              behavior: SnackBarBehavior.floating,
-              duration: Duration(seconds: 4),
-            ),
+      Map<String, dynamic> emision;
+      try {
+        emision = await _arcaFiscalService.emitirFactura(
+          factura: factura,
+          puntoVenta: puntoVentaStr,
+          cuitEmisor: emisorCuit,
+        );
+      } on ArcaFiscalException catch (e) {
+        if (_arcaFiscalService.permitirSimulacionFallback &&
+            (e.code == 'NETWORK_TIMEOUT' ||
+                e.code == 'NETWORK_ERROR' ||
+                e.code == 'API_NOT_CONFIGURED' ||
+                e.message.contains('no respondió') ||
+                e.message.contains('puerto 3000') ||
+                e.message.contains('No se pudo conectar'))) {
+          emision = await _arcaFiscalService.emitirFacturaSimulada(
+            factura: factura,
+            puntoVenta: puntoVentaStr,
+            cuitEmisor: emisorCuit,
           );
+        } else {
+          rethrow;
+        }
       }
 
-      // Mostrar diálogo de éxito con opciones de Compartir PDF y Ver Historial
-      await _mostrarDialogoExito(facturaData);
+      await _guardarFacturaYNotificar(
+        emision: emision,
+        factura: factura,
+        puntoVentaStr: puntoVentaStr,
+        facturaOriginal: facturaOriginal,
+      );
     } on ArcaFiscalException catch (e) {
       _mostrarErrorEmision(e.message);
     } catch (e) {
@@ -1140,6 +1101,79 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       // Siempre se libera el estado de carga para que el botón vuelva a habilitarse.
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _guardarFacturaYNotificar({
+    required Map<String, dynamic> emision,
+    required FacturaModel factura,
+    required String puntoVentaStr,
+    FacturaModel? facturaOriginal,
+  }) async {
+    final numeroComprobante = emision['numeroComprobante'].toString();
+    final esSimulada =
+        emision['modoSimulacion'] == true || emision['simulada'] == true;
+    final facturaAprobada = factura.copyWith(
+      nroFactura: '$puntoVentaStr-$numeroComprobante',
+      puntoVenta: emision['puntoVenta'].toString(),
+      numeroComprobante: numeroComprobante,
+      cae: emision['cae'].toString(),
+      fechaVtoCae: DateTime.parse(emision['fechaVtoCae'].toString()),
+      resultadoEmision: 'Aprobado',
+      qrUrl: emision['qrUrl']?.toString(),
+      qrData: emision['qrData']?.toString(),
+      modoHomologacion: emision['modoHomologacion'] == true,
+    );
+    final facturaData = facturaAprobada.toMap()
+      ..['created_at'] = FieldValue.serverTimestamp()
+      ..['modoSimulacion'] = esSimulada
+      ..['simulada'] = esSimulada;
+
+    final facturas = FirebaseFirestore.instance.collection('facturas');
+    final nuevaFactura = facturas.doc();
+    final batch = FirebaseFirestore.instance.batch()
+      ..set(nuevaFactura, facturaData);
+    if (facturaOriginal != null) {
+      batch.update(facturas.doc(facturaOriginal.id), {
+        'anulada': true,
+        'es_anulada': true,
+        'anuladaPorNcId': nuevaFactura.id,
+        'anulada_por_nc_id': nuevaFactura.id,
+        'anuladaPorNcNumero': facturaAprobada.nroFactura,
+        'anulada_por_nc_numero': facturaAprobada.nroFactura,
+      });
+    }
+    await batch.commit();
+
+    widget.onFacturaEmitida?.call();
+
+    if (!mounted) return;
+
+    if (esSimulada) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Factura emitida en modo simulación (backend no disponible)',
+                    style: TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Color(0xFFD97706),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 4),
+          ),
+        );
+    }
+
+    // Mostrar diálogo de éxito con opciones de Compartir PDF y Ver Historial
+    await _mostrarDialogoExito(facturaData);
   }
 
   void _mostrarErrorEmision(String mensaje) {
