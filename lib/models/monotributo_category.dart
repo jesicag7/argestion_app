@@ -31,6 +31,80 @@ class MonotributoCategory {
     return monto;
   }
 
+  /// Impacto fiscal de un documento guardado en `facturas` (ver [impactoFiscal]).
+  /// Es la única fuente de verdad para tope, cupo y reportes: la NC resta.
+  static double impactoFiscalDocumento(Map<String, dynamic> data) {
+    final rawMonto = data['monto'];
+    final monto = rawMonto is num
+        ? rawMonto.toDouble()
+        : double.tryParse(rawMonto?.toString() ?? '') ?? 0.0;
+    return impactoFiscal(
+      monto: monto,
+      esNotaCredito: esNotaCredito(data),
+      anulada: estaAnulada(data),
+      tieneNotaCreditoAsociada: _idNotaCreditoAsociada(data).isNotEmpty,
+    );
+  }
+
+  static bool esNotaCredito(Map<String, dynamic> data) {
+    final tipo = (data['tipo_comprobante'] ?? data['tipo_factura'] ?? '')
+        .toString()
+        .toLowerCase();
+    return data['esNotaCredito'] == true ||
+        data['es_nota_credito'] == true ||
+        tipo.startsWith('nota de crédito');
+  }
+
+  static bool estaAnulada(Map<String, dynamic> data) =>
+      data['anulada'] == true || data['es_anulada'] == true;
+
+  static bool estaCobrada(Map<String, dynamic> data) {
+    final estado = (data['estadoCobro'] ?? data['estado_cobro'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final cobrada = data['cobrada']?.toString().trim().toLowerCase();
+    return estado == 'cobrada' || cobrada == 'true' || cobrada == 'cobrada';
+  }
+
+  static String _idNotaCreditoAsociada(Map<String, dynamic> data) =>
+      (data['anuladaPorNcId'] ?? data['anulada_por_nc_id'])?.toString() ?? '';
+
+  /// Neto cobrado de un conjunto de documentos dentro de un período.
+  ///
+  /// - Una factura cobrada suma su impacto fiscal.
+  /// - Una Nota de Crédito resta solo si la factura que anula
+  ///   (`comprobanteAsociadoId`) está marcada como cobrada. Si la factura
+  ///   estaba pendiente, la NC no mueve el neto cobrado (no genera saldo
+  ///   negativo).
+  /// [enPeriodo] indica si el documento cae en el período analizado.
+  static double netoCobrado(
+    List<({String id, Map<String, dynamic> data})> docs, {
+    required bool Function(Map<String, dynamic> data) enPeriodo,
+  }) {
+    final idsCobrados = {
+      for (final doc in docs)
+        if (estaCobrada(doc.data)) doc.id,
+    };
+    var total = 0.0;
+    for (final doc in docs) {
+      final data = doc.data;
+      if (!enPeriodo(data)) continue;
+      if (esNotaCredito(data)) {
+        if (estaAnulada(data)) continue;
+        final asociada =
+            (data['comprobanteAsociadoId'] ?? data['comprobante_asociado_id'])
+                ?.toString();
+        if (asociada != null && idsCobrados.contains(asociada)) {
+          total += impactoFiscalDocumento(data);
+        }
+      } else if (estaCobrada(data)) {
+        total += impactoFiscalDocumento(data);
+      }
+    }
+    return total;
+  }
+
   // Existing application scale values, centralized for all fiscal projections.
   static const Map<String, double> annualIncomeLimits = {
     'A': 7720000,

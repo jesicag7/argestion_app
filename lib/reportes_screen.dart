@@ -67,13 +67,11 @@ class _ReportesScreenState extends State<ReportesScreen> {
       date != null && !date.isBefore(start) && date.isBefore(end);
 
   bool _isCobrada(Map<String, dynamic> data) {
-    final estado =
-        (data['estadoCobro'] ?? data['estado_cobro'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
-    final cobrada =
-        data['cobrada']?.toString().trim().toLowerCase();
+    final estado = (data['estadoCobro'] ?? data['estado_cobro'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final cobrada = data['cobrada']?.toString().trim().toLowerCase();
     return estado == 'cobrada' || cobrada == 'true' || cobrada == 'cobrada';
   }
 
@@ -90,16 +88,7 @@ class _ReportesScreenState extends State<ReportesScreen> {
       data['anulada'] == true || data['es_anulada'] == true;
 
   double _impactoFiscal(Map<String, dynamic> data) =>
-      MonotributoCategory.impactoFiscal(
-        monto: _parseAmount(data['monto']),
-        esNotaCredito: _esNotaCredito(data),
-        anulada: _estaAnulada(data),
-        tieneNotaCreditoAsociada:
-            (data['anuladaPorNcId'] ?? data['anulada_por_nc_id'])
-                ?.toString()
-                .isNotEmpty ==
-            true,
-      );
+      MonotributoCategory.impactoFiscalDocumento(data);
 
   double _sumarFacturadoUltimos12Meses(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
@@ -175,9 +164,10 @@ class _ReportesScreenState extends State<ReportesScreen> {
     for (final doc in gastosDocs) {
       final data = doc.data();
       final fecha = _formatDate(data['fecha_gasto']);
-      final concepto = (data['concepto'] ?? 'Gasto')
-          .toString()
-          .replaceAll('"', '""');
+      final concepto = (data['concepto'] ?? 'Gasto').toString().replaceAll(
+        '"',
+        '""',
+      );
       buffer.writeln(
         'Gasto,$fecha,"$concepto",Registrado,${_parseAmount(data['monto']).toStringAsFixed(2)}',
       );
@@ -614,33 +604,26 @@ class _ReportesScreenState extends State<ReportesScreen> {
                         final now = DateTime.now();
                         final inicioPeriodo = DateTime(now.year, now.month);
                         final finPeriodo = DateTime(now.year, now.month + 1);
-                        var ingresosCobrados = 0.0;
-                        for (final doc in docs) {
-                          final data = doc.data();
-                          final fecha = _parseDate(
-                            data['fecha_emision'] ??
-                                data['fechaEmision'] ??
-                                data['fecha'] ??
-                                data['created_at'] ??
-                                data['createdAt'],
-                          );
-                          if (_isCobrada(data) &&
-                              _isWithinPeriod(
-                                fecha,
+                        // La NC resta del neto cobrado solo si su factura
+                        // original está cobrada (ver MonotributoCategory.netoCobrado).
+                        final ingresosCobrados =
+                            MonotributoCategory.netoCobrado(
+                              [
+                                for (final doc in docs)
+                                  (id: doc.id, data: doc.data()),
+                              ],
+                              enPeriodo: (data) => _isWithinPeriod(
+                                _parseDate(
+                                  data['fecha_emision'] ??
+                                      data['fechaEmision'] ??
+                                      data['fecha'] ??
+                                      data['created_at'] ??
+                                      data['createdAt'],
+                                ),
                                 inicioPeriodo,
                                 finPeriodo,
-                              )) {
-                            ingresosCobrados += _impactoFiscal(data);
-                          } else if (_esNotaCredito(data) &&
-                              !_estaAnulada(data) &&
-                              _isWithinPeriod(
-                                fecha,
-                                inicioPeriodo,
-                                finPeriodo,
-                              )) {
-                            ingresosCobrados += _impactoFiscal(data);
-                          }
-                        }
+                              ),
+                            );
 
                         var totalGastos = 0.0;
                         for (final doc in gastosDocs) {

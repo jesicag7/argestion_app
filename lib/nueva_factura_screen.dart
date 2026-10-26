@@ -520,25 +520,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       if (fechaRaw is Timestamp) fecha = fechaRaw.toDate();
       if (fechaRaw is String) fecha = DateTime.tryParse(fechaRaw);
       if (fecha != null && fecha.isAfter(hace12Meses)) {
-        final monto = (data['monto'] is num)
-            ? (data['monto'] as num).toDouble()
-            : double.tryParse(data['monto']?.toString() ?? '0') ?? 0.0;
-        final tipo = (data['tipo_comprobante'] ?? data['tipo_factura'] ?? '')
-            .toString()
-            .toLowerCase();
-        total += MonotributoCategory.impactoFiscal(
-          monto: monto,
-          esNotaCredito:
-              data['esNotaCredito'] == true ||
-              data['es_nota_credito'] == true ||
-              tipo.startsWith('nota de crédito'),
-          anulada: data['anulada'] == true || data['es_anulada'] == true,
-          tieneNotaCreditoAsociada:
-              (data['anuladaPorNcId'] ?? data['anulada_por_nc_id'])
-                  ?.toString()
-                  .isNotEmpty ==
-              true,
-        );
+        total += MonotributoCategory.impactoFiscalDocumento(data);
       }
     }
     return total;
@@ -1122,6 +1104,17 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
         emisorCuit: emisorCuit,
         emisorDomicilio: emisorDomicilio,
       );
+      // Chequeo previo: si la factura original ya fue anulada, no se llama a ARCA.
+      final idOriginal = facturaOriginal?.id;
+      if (idOriginal != null) {
+        final actual = await FirebaseFirestore.instance
+            .collection('facturas')
+            .doc(idOriginal)
+            .get();
+        final motivo = FacturaModel.motivoNoAnulable(actual.data());
+        if (motivo != null) throw FacturaNoAnulableException(motivo);
+      }
+
       Map<String, dynamic> emision;
       try {
         emision = await _arcaFiscalService.emitirFactura(
@@ -1153,6 +1146,8 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
         puntoVentaStr: puntoVentaStr,
         facturaOriginal: facturaOriginal,
       );
+    } on FacturaNoAnulableException catch (e) {
+      _mostrarErrorEmision(e.message);
     } on ArcaFiscalException catch (e) {
       _mostrarErrorEmision(e.message);
     } catch (e) {
@@ -1190,19 +1185,33 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
 
     final facturas = FirebaseFirestore.instance.collection('facturas');
     final nuevaFactura = facturas.doc();
-    final batch = FirebaseFirestore.instance.batch()
-      ..set(nuevaFactura, facturaData);
-    if (facturaOriginal != null) {
-      batch.update(facturas.doc(facturaOriginal.id), {
-        'anulada': true,
-        'es_anulada': true,
-        'anuladaPorNcId': nuevaFactura.id,
-        'anulada_por_nc_id': nuevaFactura.id,
-        'anuladaPorNcNumero': facturaAprobada.nroFactura,
-        'anulada_por_nc_numero': facturaAprobada.nroFactura,
+    final originalId = facturaOriginal?.id;
+    if (originalId == null) {
+      await nuevaFactura.set(facturaData);
+    } else {
+      // Alta de la NC y anulación de la original en una sola transacción:
+      // si otra NC ya anuló la factura, no se registra nada.
+      final originalRef = facturas.doc(originalId);
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final actual = await tx.get(originalRef);
+        final motivo = FacturaModel.motivoNoAnulable(actual.data());
+        if (motivo != null) {
+          throw FacturaNoAnulableException(
+            '$motivo La Nota de Crédito pudo quedar autorizada por ARCA sin '
+            'registrarse en la app: verificala en ARCA antes de reintentar.',
+          );
+        }
+        tx.set(nuevaFactura, facturaData);
+        tx.update(originalRef, {
+          'anulada': true,
+          'es_anulada': true,
+          'anuladaPorNcId': nuevaFactura.id,
+          'anulada_por_nc_id': nuevaFactura.id,
+          'anuladaPorNcNumero': facturaAprobada.nroFactura,
+          'anulada_por_nc_numero': facturaAprobada.nroFactura,
+        });
       });
     }
-    await batch.commit();
 
     widget.onFacturaEmitida?.call();
 

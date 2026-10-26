@@ -1,5 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// Se lanza cuando la factura ya no puede ser anulada (p. ej. otra NC la anuló).
+class FacturaNoAnulableException implements Exception {
+  final String message;
+
+  const FacturaNoAnulableException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 class FacturaModel {
   final String? id;
   final String idUsuario;
@@ -63,6 +73,23 @@ class FacturaModel {
   String get numeroComprobanteCompleto {
     if (nroFactura.trim().isNotEmpty) return nroFactura.trim();
     return '$puntoVentaFiscal-${numeroComprobanteFiscal ?? ''}';
+  }
+
+  /// Valida, sobre los datos almacenados, si una factura puede ser anulada con
+  /// una Nota de Crédito. Devuelve el motivo del rechazo o null si es válida.
+  /// Se usa antes de emitir y dentro de la transacción de anulación.
+  static String? motivoNoAnulable(Map<String, dynamic>? data) {
+    if (data == null) return 'La factura original no existe.';
+    final factura = FacturaModel.fromMap(data, '');
+    if (factura.esNotaCredito || factura.tipoComprobante != 'Factura C') {
+      return 'Solo se pueden anular Facturas C.';
+    }
+    final ncId = (data['anuladaPorNcId'] ?? data['anulada_por_nc_id'])
+        ?.toString();
+    if (factura.anulada || (ncId != null && ncId.isNotEmpty)) {
+      return 'La factura ya fue anulada por una Nota de Crédito.';
+    }
+    return null;
   }
 
   /// Regla única para ofrecer la emisión de una Nota de Crédito C que anule

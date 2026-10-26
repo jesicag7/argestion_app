@@ -78,7 +78,8 @@ class DashboardScreen extends StatelessWidget {
       if (data == null) continue;
       final fecha = _parseFecha(data['fecha_emision']);
       if (fecha != null && !fecha.isBefore(limite) && !fecha.isAfter(ahora)) {
-        total += (data['monto'] ?? 0).toDouble();
+        // Las NC restan (impactoFiscal); las facturas anuladas no suman doble.
+        total += MonotributoCategory.impactoFiscalDocumento(data);
       }
     }
     return total;
