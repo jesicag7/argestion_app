@@ -103,11 +103,11 @@ class _LoginScreenState extends State<LoginScreen> {
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       if (e.code == 'too-many-requests') {
-        _mostrarError('Por favor esperá unos minutos antes de solicitar otro reenvío.');
-      } else {
         _mostrarError(
-          'No se pudo reenviar el correo: ${e.message ?? e.code}',
+          'Por favor esperá unos minutos antes de solicitar otro reenvío.',
         );
+      } else {
+        _mostrarError('No se pudo reenviar el correo: ${e.message ?? e.code}');
       }
     } catch (_) {
       if (!mounted) return;
@@ -115,6 +115,15 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  /// Asegura el documento de perfil y avisa si faltan datos obligatorios.
+  Future<void> _verificarPerfilCompleto() async {
+    final pendientes = await UserProfileService().asegurarPerfilUsuarioActual();
+    if (!mounted || pendientes.isEmpty) return;
+    _mostrarAviso(
+      'Completá tu perfil (nombre, CUIT y categoría) antes de emitir comprobantes.',
+    );
   }
 
   Future<void> _iniciarSesion() async {
@@ -130,10 +139,11 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final userCredential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
+      final userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text.trim(),
+          );
 
       final user = userCredential.user;
       final bool isVerified = AuthVerificationService.isEmailVerified(user);
@@ -169,7 +179,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      await UserProfileService().asegurarPerfilUsuarioActual();
+      await _verificarPerfilCompleto();
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
@@ -243,7 +253,7 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
-        await UserProfileService().asegurarPerfilUsuarioActual();
+        await _verificarPerfilCompleto();
         if (!mounted) return;
 
         Navigator.pushAndRemoveUntil(
@@ -440,7 +450,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (_mostrarBotonReenvio) ...[
                     const SizedBox(height: 12),
                     TextButton.icon(
-                      onPressed: _isBusy ? null : () => _reenviarCorreoVerificacion(),
+                      onPressed: _isBusy
+                          ? null
+                          : () => _reenviarCorreoVerificacion(),
                       icon: const Icon(
                         Icons.mark_email_unread_outlined,
                         color: Color(0xFF059669),

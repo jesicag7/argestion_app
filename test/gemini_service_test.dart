@@ -29,4 +29,17 @@ void main() {
       expect(response, contains('recategorización semestral'));
     });
   });
+
+  group('GeminiService.sendMessage sin API key', () {
+    test('responde en modo local y lo informa, sin usar otra clave', () async {
+      // Los tests no reciben --dart-define: la clave de Groq está vacía.
+      final respuesta = await GeminiService.sendMessage(
+        prompt: '¿Cómo anulo una factura?',
+      );
+
+      expect(respuesta.esLocal, isTrue);
+      expect(respuesta.texto, contains('Nota de Crédito C'));
+      expect(GeminiService.activeApiKey, groqApiKey);
+    });
+  });
 }

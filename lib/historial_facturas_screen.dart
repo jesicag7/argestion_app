@@ -61,7 +61,7 @@ class HistorialFacturasScreen extends StatelessWidget {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFFFFFFFF),
         title: const Text(
-          'Anular Factura C',
+          'Emitir Nota de Crédito C',
           style: TextStyle(color: Color(0xFF0F172A)),
         ),
         content: Text(
@@ -98,15 +98,6 @@ class HistorialFacturasScreen extends StatelessWidget {
       ),
     );
   }
-
-  bool _puedeAnular(FacturaModel factura) =>
-      !factura.anulada &&
-      !factura.esNotaCredito &&
-      factura.tipoComprobante == 'Factura C' &&
-      factura.resultadoEmision.toLowerCase() == 'aprobado' &&
-      !factura.modoHomologacion &&
-      factura.cae != null &&
-      factura.cae!.isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -389,7 +380,8 @@ class HistorialFacturasScreen extends StatelessWidget {
                                         numeroNotaCredito:
                                             factura.anuladaPorNcNumero,
                                       ),
-                                    ] else if (_puedeAnular(factura)) ...[
+                                    ] else if (factura
+                                        .puedeAnularConNotaCredito) ...[
                                       const SizedBox(height: 2),
                                       Align(
                                         alignment: Alignment.centerLeft,
@@ -415,7 +407,7 @@ class HistorialFacturasScreen extends StatelessWidget {
                                             size: 15,
                                           ),
                                           label: const Text(
-                                            'Anular con Nota de Crédito',
+                                            'Emitir Nota de Crédito',
                                             style: TextStyle(fontSize: 10),
                                           ),
                                         ),

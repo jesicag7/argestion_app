@@ -13,30 +13,20 @@ class _ChatMessage {
   final bool isUser;
   final DateTime timestamp;
 
+  /// True cuando la respuesta fue generada por el motor local (sin API).
+  final bool esLocal;
+
   _ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
+    this.esLocal = false,
   });
 }
 
 class _AyudaScreenState extends State<AyudaScreen> {
-  static const String _apiKey = groqApiKey;
-  static const String _backupApiKey = geminiApiKey;
-
-  String _activeApiKey = _apiKey.isNotEmpty ? _apiKey : _backupApiKey;
-
-  bool get _isKeyConfigured => _activeApiKey.trim().isNotEmpty;
-
-  // Modelos oficiales vigentes y compatibles en Groq
-  static const String _primaryModel = 'llama-3.1-8b-instant';
-  static const List<String> _compatibleModels = [
-    'llama-3.1-8b-instant',
-    'llama-3.3-70b-versatile',
-    'llama-3.1-70b-versatile',
-  ];
-
-  String _modelName = _primaryModel;
+  // Modelo oficial vigente en Groq. La clave se toma solo de GROQ_API_KEY.
+  static const String _modelo = 'llama-3.1-8b-instant';
 
   static const String _systemPrompt = '''
 Te llamás Lionel y sos el Asistente Inteligente de ARGestion (Horizontes Educativos).
@@ -220,7 +210,7 @@ Topes anuales que usa la app (referencia)
     _messages.clear();
     _messages.add(
       _ChatMessage(
-        text: _isKeyConfigured
+        text: GeminiService.isConfigured
             ? '¡Hola! 👋 Soy Lionel, tu asistente de ARGestion.\n\n'
                   'Te ayudo tanto con el manejo de la app '
                   '(semáforo fiscal, factura express, pagos y reportes) '
@@ -258,7 +248,7 @@ Topes anuales que usa la app (referencia)
       _textController.clear();
     }
 
-    if (!_isKeyConfigured) {
+    if (!GeminiService.isConfigured) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -288,6 +278,13 @@ Topes anuales que usa la app (referencia)
       return;
     }
 
+    // El historial se arma ANTES de agregar el mensaje actual: el texto se
+    // envía una sola vez, como prompt, y no duplicado dentro del historial.
+    final history = _messages
+        .where((m) => m.text.isNotEmpty)
+        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
+        .toList();
+
     setState(() {
       _messages.add(
         _ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
@@ -296,84 +293,30 @@ Topes anuales que usa la app (referencia)
     });
     _scrollToBottom();
 
-    String? reply;
-
-    final candidateModels = [
-      _modelName,
-      for (final m in _compatibleModels)
-        if (m != _modelName) m,
-    ];
-
-    final history = _messages
-        .where((m) => m.text.isNotEmpty)
-        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
-        .toList();
-
-    for (int i = 0; i < candidateModels.length; i++) {
-      final currentCandidate = candidateModels[i];
-      try {
-        debugPrint(
-          'Consultando modelo $currentCandidate mediante Groq Llama 3...',
-        );
-        final serviceResponse = await GeminiService.sendMessage(
-          prompt: text,
-          model: currentCandidate,
-          systemInstruction: _systemPrompt,
-          history: history,
-          customApiKey: _activeApiKey,
-        );
-        reply = serviceResponse?.trim();
-        if (reply != null && reply.isNotEmpty) {
-          _modelName = currentCandidate;
-          break; // Éxito con este modelo
-        }
-      } catch (e, stackTrace) {
-        debugPrint('>>> ERROR EXACTO ASISTENTE: $e');
-        debugPrint('>>> STACKTRACE: $stackTrace');
-
-        final errorStr = e.toString();
-
-        final isAuthError =
-            errorStr.contains('401') ||
-            errorStr.contains('UNAUTHENTICATED') ||
-            errorStr.contains('API_KEY_SERVICE_BLOCKED') ||
-            errorStr.contains('invalid authentication credentials');
-
-        // Si la clave primaria falla por 401 y disponemos de clave de respaldo, cambiamos y reintentamos
-        if (isAuthError &&
-            _backupApiKey.isNotEmpty &&
-            _activeApiKey != _backupApiKey) {
-          debugPrint('>>> Reintentando con API Key de respaldo...');
-          _activeApiKey = _backupApiKey;
-          i--;
-          continue;
-        }
-
-        final isNotFound =
-            errorStr.contains('404') ||
-            errorStr.contains('503') ||
-            errorStr.contains('NOT_FOUND') ||
-            errorStr.contains('not found') ||
-            errorStr.contains('no longer available') ||
-            errorStr.contains('high demand');
-
-        // Si es 404 / 503 / no longer available y hay alternativas, probamos la siguiente
-        if (isNotFound && i < candidateModels.length - 1) {
-          continue;
-        }
-
-        reply = GeminiService.responderFallbackLocal(text);
-        break;
-      }
+    RespuestaAsistente respuesta;
+    try {
+      respuesta = await GeminiService.sendMessage(
+        prompt: text,
+        model: _modelo,
+        systemInstruction: _systemPrompt,
+        history: history,
+      );
+    } catch (e) {
+      debugPrint('>>> ERROR ASISTENTE: $e');
+      respuesta = RespuestaAsistente(
+        GeminiService.responderFallbackLocal(text),
+        esLocal: true,
+      );
     }
 
     if (!mounted) return;
     setState(() {
       _messages.add(
         _ChatMessage(
-          text: reply ?? GeminiService.responderFallbackLocal(text),
+          text: respuesta.texto,
           isUser: false,
           timestamp: DateTime.now(),
+          esLocal: respuesta.esLocal,
         ),
       );
       _isLoading = false;
@@ -417,7 +360,7 @@ Topes anuales que usa la app (referencia)
                       width: 7,
                       height: 7,
                       decoration: BoxDecoration(
-                        color: _isKeyConfigured
+                        color: GeminiService.isConfigured
                             ? greenOnline
                             : const Color(0xFFF59E0B),
                         shape: BoxShape.circle,
@@ -425,9 +368,9 @@ Topes anuales que usa la app (referencia)
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      _isKeyConfigured ? 'En línea' : 'Sin API Key',
+                      GeminiService.isConfigured ? 'En línea' : 'Sin API Key',
                       style: TextStyle(
-                        color: _isKeyConfigured
+                        color: GeminiService.isConfigured
                             ? greenOnline
                             : const Color(0xFFF59E0B),
                         fontSize: 11.5,
@@ -466,7 +409,7 @@ Topes anuales que usa la app (referencia)
       body: Column(
         children: [
           // Banner de aviso si falta configurar la clave
-          if (!_isKeyConfigured)
+          if (!GeminiService.isConfigured)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -692,6 +635,30 @@ Topes anuales que usa la app (referencia)
                     message.text,
                     isUser ? Colors.white : const Color(0xFF0F172A),
                   ),
+                  if (message.esLocal) ...[
+                    const SizedBox(height: 6),
+                    const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.wifi_off_rounded,
+                          size: 12,
+                          color: Color(0xFFB45309),
+                        ),
+                        SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            'Respuesta en modo local (sin conexión con el asistente)',
+                            style: TextStyle(
+                              color: Color(0xFFB45309),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 5),
                   Text(
                     hora,

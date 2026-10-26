@@ -37,11 +37,43 @@ class FacturaModel {
   final String? comprobanteAsociadoId;
   final String? comprobanteAsociadoNumero;
   final String? comprobanteAsociadoTipo;
+  final String? comprobanteAsociadoPuntoVenta;
+  final String? comprobanteAsociadoNumeroComprobante;
   final bool anulada;
   final String? anuladaPorNcId;
   final String? anuladaPorNcNumero;
 
   bool get estaCobrada => estadoCobro.trim().toLowerCase() == 'cobrada';
+
+  /// Punto de venta con 4 dígitos (formato fiscal), por ejemplo "0001".
+  String get puntoVentaFiscal => puntoVenta.trim().padLeft(4, '0');
+
+  /// Número del comprobante sin punto de venta, por ejemplo "00000123".
+  String? get numeroComprobanteFiscal {
+    final numero = numeroComprobante?.trim();
+    if (numero != null && numero.isNotEmpty) return numero;
+    final partes = nroFactura.trim().split('-');
+    if (partes.length == 2 && partes[1].trim().isNotEmpty) {
+      return partes[1].trim();
+    }
+    return null;
+  }
+
+  /// Número visible del comprobante, por ejemplo "0001-00000123".
+  String get numeroComprobanteCompleto {
+    if (nroFactura.trim().isNotEmpty) return nroFactura.trim();
+    return '$puntoVentaFiscal-${numeroComprobanteFiscal ?? ''}';
+  }
+
+  /// Regla única para ofrecer la emisión de una Nota de Crédito C que anule
+  /// esta factura. Se usa tanto en el historial como en el selector de NC.
+  bool get puedeAnularConNotaCredito =>
+      !anulada &&
+      !esNotaCredito &&
+      tipoComprobante == 'Factura C' &&
+      resultadoEmision.trim().toLowerCase() == 'aprobado' &&
+      (cae?.trim().isNotEmpty ?? false) &&
+      numeroComprobanteFiscal != null;
 
   FacturaModel({
     this.id,
@@ -80,6 +112,8 @@ class FacturaModel {
     this.comprobanteAsociadoId,
     this.comprobanteAsociadoNumero,
     this.comprobanteAsociadoTipo,
+    this.comprobanteAsociadoPuntoVenta,
+    this.comprobanteAsociadoNumeroComprobante,
     this.anulada = false,
     this.anuladaPorNcId,
     this.anuladaPorNcNumero,
@@ -133,6 +167,9 @@ class FacturaModel {
       comprobanteAsociadoId: comprobanteAsociadoId,
       comprobanteAsociadoNumero: comprobanteAsociadoNumero,
       comprobanteAsociadoTipo: comprobanteAsociadoTipo,
+      comprobanteAsociadoPuntoVenta: comprobanteAsociadoPuntoVenta,
+      comprobanteAsociadoNumeroComprobante:
+          comprobanteAsociadoNumeroComprobante,
       anulada: anulada,
       anuladaPorNcId: anuladaPorNcId,
       anuladaPorNcNumero: anuladaPorNcNumero,
@@ -163,11 +200,10 @@ class FacturaModel {
     final fechaEmision =
         parseDate(map['fecha_emision'] ?? map['fechaEmision']) ??
         DateTime.now();
-    final estadoCobroRaw =
-        (map['estadoCobro'] ?? map['estado_cobro'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
+    final estadoCobroRaw = (map['estadoCobro'] ?? map['estado_cobro'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
     final cobradaRaw = map['cobrada']?.toString().trim().toLowerCase();
     final estaCobrada =
         (cobradaRaw == 'true' || cobradaRaw == 'cobrada') ||
@@ -227,12 +263,19 @@ class FacturaModel {
                   map['comprobante_asociado_numero'])
               ?.toString(),
       comprobanteAsociadoTipo:
-          (map['comprobanteAsociadoTipo'] ??
-                  map['comprobante_asociado_tipo'])
+          (map['comprobanteAsociadoTipo'] ?? map['comprobante_asociado_tipo'])
+              ?.toString(),
+      comprobanteAsociadoPuntoVenta:
+          (map['comprobanteAsociadoPuntoVenta'] ??
+                  map['comprobante_asociado_punto_venta'])
+              ?.toString(),
+      comprobanteAsociadoNumeroComprobante:
+          (map['comprobanteAsociadoNumeroComprobante'] ??
+                  map['comprobante_asociado_numero_comprobante'])
               ?.toString(),
       anulada: map['anulada'] == true || map['es_anulada'] == true,
-      anuladaPorNcId:
-          (map['anuladaPorNcId'] ?? map['anulada_por_nc_id'])?.toString(),
+      anuladaPorNcId: (map['anuladaPorNcId'] ?? map['anulada_por_nc_id'])
+          ?.toString(),
       anuladaPorNcNumero:
           (map['anuladaPorNcNumero'] ?? map['anulada_por_nc_numero'])
               ?.toString(),
@@ -289,6 +332,12 @@ class FacturaModel {
       'comprobante_asociado_numero': comprobanteAsociadoNumero,
       'comprobanteAsociadoTipo': comprobanteAsociadoTipo,
       'comprobante_asociado_tipo': comprobanteAsociadoTipo,
+      'comprobanteAsociadoPuntoVenta': comprobanteAsociadoPuntoVenta,
+      'comprobante_asociado_punto_venta': comprobanteAsociadoPuntoVenta,
+      'comprobanteAsociadoNumeroComprobante':
+          comprobanteAsociadoNumeroComprobante,
+      'comprobante_asociado_numero_comprobante':
+          comprobanteAsociadoNumeroComprobante,
       'anulada': anulada,
       'es_anulada': anulada,
       'anuladaPorNcId': anuladaPorNcId,

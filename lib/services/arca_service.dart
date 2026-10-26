@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:http/http.dart' as http;
@@ -25,27 +26,35 @@ class ArcaFiscalService {
   static const String mensajeServidorNoDisponible =
       'No se pudo conectar con el servidor fiscal. Verificá que el backend '
       'esté ejecutándose en el puerto 3000.';
+  static const String mensajeModoSimulacion =
+      'Factura emitida en modo simulación (backend no disponible)';
 
   ArcaFiscalService({
     http.Client? client,
     Uri? endpoint,
     bool? modoHomologacion,
     FirebaseAuth? firebaseAuth,
+    FirebaseFirestore? firestore,
+    this.permitirSimulacionFallback = true,
   }) : _client = client ?? http.Client(),
        _endpoint = endpoint ?? _configuredEndpoint(),
        modoHomologacion =
            modoHomologacion ??
            const bool.fromEnvironment('ARCA_HOMOLOGACION', defaultValue: true),
-       _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance;
+       _firebaseAuth = firebaseAuth,
+       _firestore = firestore;
 
   final http.Client _client;
   final Uri? _endpoint;
-  final FirebaseAuth _firebaseAuth;
+  final FirebaseAuth? _firebaseAuth;
+  final FirebaseFirestore? _firestore;
+
+  /// Permite generar una factura simulada si el backend no está disponible.
+  final bool permitirSimulacionFallback;
 
   /// True selects the fiscal intermediary's homologation environment.
   final bool modoHomologacion;
 
-<<<<<<< Updated upstream
   static int _ultimoNumeroSimulado = 0;
   static int _caeSequence = 0;
 
@@ -112,8 +121,8 @@ class ArcaFiscalService {
 
         for (final doc in query.docs) {
           final data = doc.data();
-          final pto =
-              (data['puntoVenta'] ?? data['punto_venta'] ?? '').toString();
+          final pto = (data['puntoVenta'] ?? data['punto_venta'] ?? '')
+              .toString();
           if (pto.padLeft(4, '0') == puntoVenta.toString().padLeft(4, '0')) {
             final rawNum =
                 data['numeroComprobante'] ?? data['numero_comprobante'];
@@ -196,12 +205,10 @@ class ArcaFiscalService {
     };
   }
 
-=======
->>>>>>> Stashed changes
   static Uri? _configuredEndpoint() {
     const apiUrl = String.fromEnvironment(
       'ARCA_API_URL',
-      defaultValue: 'http://10.0.2.2:3000/api',
+      defaultValue: 'http://localhost:3000/api',
     );
     final base = Uri.tryParse(apiUrl);
     if (base == null || !base.hasAuthority) return null;
@@ -236,8 +243,7 @@ class ArcaFiscalService {
   bool get permiteCuitDePrueba =>
       kDebugMode ||
       _endpoint?.host == 'localhost' ||
-      _endpoint?.host == '127.0.0.1' ||
-      _endpoint?.host == '10.0.2.2';
+      _endpoint?.host == '127.0.0.1';
 
   static const cuitEmisorDePrueba = '20111111112';
 
@@ -259,7 +265,6 @@ class ArcaFiscalService {
         (endpoint.scheme != 'https' &&
             !(modoHomologacion &&
                 endpoint.scheme == 'http' &&
-<<<<<<< Updated upstream
                 (esLocal ||
                     endpoint.host == 'localhost' ||
                     endpoint.host == '127.0.0.1')))) {
@@ -270,11 +275,6 @@ class ArcaFiscalService {
           cuitEmisor: cuitEmisor,
         );
       }
-=======
-                (endpoint.host == 'localhost' ||
-                    endpoint.host == '127.0.0.1' ||
-                    endpoint.host == '10.0.2.2')))) {
->>>>>>> Stashed changes
       throw const ArcaFiscalException(
         'La API fiscal no está configurada con una URL HTTPS válida. '
         'Definí ARCA_API_URL con la URL HTTPS del backend fiscal.',
@@ -301,15 +301,33 @@ class ArcaFiscalService {
       );
     }
 
-    final user = _firebaseAuth.currentUser;
-    if (user == null) {
+    User? user;
+    try {
+      if (_firebaseAuth != null) {
+        user = _firebaseAuth.currentUser;
+      } else {
+        user = FirebaseAuth.instance.currentUser;
+      }
+    } catch (_) {
+      user = null;
+    }
+
+    String? idToken;
+    if (user != null) {
+      try {
+        idToken = await user.getIdToken();
+      } catch (_) {
+        // En caso de fallar refresco de token offline
+      }
+    }
+    if (user == null && !_debeUsarSimulacionFallback(endpoint)) {
       throw const ArcaFiscalException(
         'La sesión expiró. Iniciá sesión nuevamente para emitir.',
         code: 'AUTH_REQUIRED',
       );
     }
-    final idToken = await user.getIdToken();
-    if (idToken == null || idToken.isEmpty) {
+    if ((idToken == null || idToken.isEmpty) &&
+        !_debeUsarSimulacionFallback(endpoint)) {
       throw const ArcaFiscalException(
         'No se pudo validar la sesión con el backend fiscal.',
         code: 'AUTH_TOKEN_UNAVAILABLE',
@@ -382,13 +400,12 @@ class ArcaFiscalService {
             headers: {
               'Content-Type': 'application/json; charset=utf-8',
               'Accept': 'application/json',
-              'Authorization': 'Bearer $idToken',
+              'Authorization': 'Bearer ${idToken ?? "simulated_id_token"}',
             },
             body: cuerpoJson,
           )
           .timeout(timeout);
     } on TimeoutException {
-<<<<<<< Updated upstream
       if (_debeUsarSimulacionFallback(endpoint)) {
         return _generarRespuestaSimulada(
           factura: factura,
@@ -403,21 +420,29 @@ class ArcaFiscalService {
       final seg = timeout.inSeconds;
       throw ArcaFiscalException(
         'El servidor fiscal no respondió en $seg segundos. Verificá que el '
-=======
-      throw const ArcaFiscalException(
-        'El servidor fiscal no respondió en 10 segundos. Verificá que el '
->>>>>>> Stashed changes
         'backend esté ejecutándose en el puerto 3000.',
         code: 'NETWORK_TIMEOUT',
       );
     } catch (_) {
+      // Cualquier fallo al enviar la solicitud (SocketException, ClientException,
+      // servidor apagado o sin conexión) se trata como servidor no disponible.
+      if (_debeUsarSimulacionFallback(endpoint)) {
+        return _generarRespuestaSimulada(
+          factura: factura,
+          puntoVentaNumber: puntoVentaNumber,
+          normalizedCuit: normalizedCuit,
+          tipoComprobante: tipoComprobante,
+          receptorDoc: receptorDoc,
+          fechaEmision: fechaEmision,
+          userId: user?.uid ?? factura.idUsuario,
+        );
+      }
       throw const ArcaFiscalException(
         mensajeServidorNoDisponible,
         code: 'NETWORK_ERROR',
       );
     }
 
-<<<<<<< Updated upstream
     if ((response.statusCode == 500 ||
             response.statusCode == 502 ||
             response.statusCode == 503 ||
@@ -434,8 +459,6 @@ class ArcaFiscalService {
       );
     }
 
-=======
->>>>>>> Stashed changes
     Map<String, dynamic> body;
     try {
       final decoded = jsonDecode(response.body);
@@ -588,6 +611,8 @@ class ArcaFiscalService {
     dynamic errors,
     int statusCode,
   ) {
+    // 401 (sesión) y 5xx (fallas internas del backend) no son rechazos de ARCA;
+    // se muestra el mensaje tal cual para no inducir a error.
     final esRechazoArca = statusCode != 401 && statusCode < 500;
     final directMessage =
         response['message'] ?? response['mensaje'] ?? response['error'];
@@ -648,10 +673,14 @@ class ArcaFiscalService {
   static Map<String, int> _buildComprobanteAsociado(FacturaModel factura) {
     final tipo = factura.comprobanteAsociadoTipo?.trim();
     final numero = factura.comprobanteAsociadoNumero?.trim();
+    final ptoVentaExplicito = factura.comprobanteAsociadoPuntoVenta?.trim();
+    final nroExplicito = factura.comprobanteAsociadoNumeroComprobante?.trim();
+    final tieneDatosExplicitos =
+        (ptoVentaExplicito?.isNotEmpty ?? false) &&
+        (nroExplicito?.isNotEmpty ?? false);
     if (tipo == null ||
         tipo.isEmpty ||
-        numero == null ||
-        numero.isEmpty ||
+        (!tieneDatosExplicitos && (numero == null || numero.isEmpty)) ||
         factura.comprobanteAsociadoId == null ||
         factura.comprobanteAsociadoId!.isEmpty) {
       throw const ArcaFiscalException(
@@ -660,13 +689,27 @@ class ArcaFiscalService {
       );
     }
 
-    final match = RegExp(r'^(\d{1,5})-(\d{1,8})$').firstMatch(numero);
-    final puntoVenta = match == null
-        ? int.tryParse(factura.puntoVenta)
-        : int.tryParse(match.group(1)!);
-    final numeroComprobante = match == null
-        ? int.tryParse(numero)
-        : int.tryParse(match.group(2)!);
+    if (factura.tipoComprobante == 'Nota de Crédito C' && tipo != 'Factura C') {
+      throw const ArcaFiscalException(
+        'La Nota de Crédito C solo puede anular una Factura C.',
+        code: 'ASSOCIATED_RECEIPT_TYPE_MISMATCH',
+      );
+    }
+
+    final int? puntoVenta;
+    final int? numeroComprobante;
+    if (tieneDatosExplicitos) {
+      puntoVenta = int.tryParse(ptoVentaExplicito ?? '');
+      numeroComprobante = int.tryParse(nroExplicito ?? '');
+    } else {
+      final match = RegExp(r'^(\d{1,5})-(\d{1,8})$').firstMatch(numero ?? '');
+      puntoVenta = match == null
+          ? int.tryParse(factura.puntoVenta)
+          : int.tryParse(match.group(1)!);
+      numeroComprobante = match == null
+          ? int.tryParse(numero ?? '')
+          : int.tryParse(match.group(2)!);
+    }
     if (puntoVenta == null ||
         puntoVenta < 1 ||
         puntoVenta > 99999 ||

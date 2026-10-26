@@ -17,9 +17,7 @@ import 'models/monotributo_category.dart';
 class DigitosConAdvertenciaInputFormatter extends TextInputFormatter {
   final VoidCallback onCaracterInvalido;
 
-  const DigitosConAdvertenciaInputFormatter({
-    required this.onCaracterInvalido,
-  });
+  const DigitosConAdvertenciaInputFormatter({required this.onCaracterInvalido});
 
   @override
   TextEditingValue formatEditUpdate(
@@ -194,35 +192,84 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
   Map<String, dynamic>? _userData;
   List<QueryDocumentSnapshot<Map<String, dynamic>>>? _facturasDocs;
 
+  /// Factura C elegida desde el selector "Comprobante Asociado a Anular".
+  /// Cuando la pantalla se abre desde el historial, el comprobante llega por
+  /// [NuevaFacturaScreen.comprobanteAAnular] y este campo queda nulo.
+  FacturaModel? _facturaAsociada;
+
+  /// Comprobante que la Nota de Crédito C anula (desde el historial o el selector).
+  FacturaModel? get _facturaOriginal =>
+      widget.comprobanteAAnular ?? _facturaAsociada;
+
+  bool get _esNotaCredito => _tipoComprobante == 'Nota de Crédito C';
+
+  /// Facturas C del usuario que todavía pueden anularse con una Nota de Crédito.
+  /// Devuelve lista vacía mientras Firestore no entregó datos.
+  List<FacturaModel> get _facturasAnulables {
+    final docs = _facturasDocs;
+    if (docs == null) return const [];
+    final anulables = docs
+        .map((doc) => FacturaModel.fromMap(doc.data(), doc.id))
+        .where((factura) => factura.puedeAnularConNotaCredito)
+        .toList();
+    anulables.sort((a, b) => b.fechaEmision.compareTo(a.fechaEmision));
+    return anulables;
+  }
+
+  /// Completa el formulario con los datos de la factura a anular.
+  /// No marca la fecha de emisión: la NC siempre se emite con la fecha actual.
+  void _precargarDesdeFactura(FacturaModel facturaAAnular) {
+    _actualizandoClienteSeleccionado = true;
+    _puntoVentaController.text = facturaAAnular.puntoVenta;
+    _concepto = facturaAAnular.concepto;
+    _periodoDesde = facturaAAnular.periodoDesde;
+    _periodoHasta = facturaAAnular.periodoHasta;
+    _vtoPago = facturaAAnular.vencimientoPago;
+    _condicionIvaCliente =
+        facturaAAnular.condicionIvaCliente ?? 'Consumidor Final';
+    _tipoDocCliente = switch (facturaAAnular.tipoDocumentoCliente) {
+      80 => 'CUIT',
+      96 => 'DNI',
+      _ => 'Consumidor Final',
+    };
+    _nroDocController.text = facturaAAnular.cuitCliente == 'Consumidor Final'
+        ? ''
+        : facturaAAnular.cuitCliente;
+    _nombreClienteController.text = facturaAAnular.nombreCliente;
+    _domicilioClienteController.text = facturaAAnular.domicilioCliente ?? '';
+    _descripcionController.text =
+        facturaAAnular.descripcionItem ?? facturaAAnular.concepto;
+    _montoController.text = facturaAAnular.monto.toStringAsFixed(2);
+    _condicionVenta = facturaAAnular.condicionVenta ?? 'Transferencia / Débito';
+    _clienteIdSeleccionado = null;
+    _actualizandoClienteSeleccionado = false;
+  }
+
+  void _seleccionarFacturaAsociada(String? facturaId) {
+    final factura = _facturasAnulables
+        .where((item) => item.id == facturaId)
+        .firstOrNull;
+    setState(() {
+      _facturaAsociada = factura;
+      if (factura != null) _precargarDesdeFactura(factura);
+    });
+  }
+
+  void _onTipoComprobanteChanged(String tipo) {
+    setState(() {
+      _tipoComprobante = tipo;
+      if (!_esNotaCredito) _facturaAsociada = null;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     final facturaAAnular = widget.comprobanteAAnular;
     if (facturaAAnular != null) {
       _tipoComprobante = 'Nota de Crédito C';
-      _puntoVentaController.text = facturaAAnular.puntoVenta;
       _fechaEmision = DateTime.now();
-      _concepto = facturaAAnular.concepto;
-      _periodoDesde = facturaAAnular.periodoDesde;
-      _periodoHasta = facturaAAnular.periodoHasta;
-      _vtoPago = facturaAAnular.vencimientoPago;
-      _condicionIvaCliente =
-          facturaAAnular.condicionIvaCliente ?? 'Consumidor Final';
-      _tipoDocCliente = switch (facturaAAnular.tipoDocumentoCliente) {
-        80 => 'CUIT',
-        96 => 'DNI',
-        _ => 'Consumidor Final',
-      };
-      _nroDocController.text = facturaAAnular.cuitCliente == 'Consumidor Final'
-          ? ''
-          : facturaAAnular.cuitCliente;
-      _nombreClienteController.text = facturaAAnular.nombreCliente;
-      _domicilioClienteController.text = facturaAAnular.domicilioCliente ?? '';
-      _descripcionController.text =
-          facturaAAnular.descripcionItem ?? facturaAAnular.concepto;
-      _montoController.text = facturaAAnular.monto.toStringAsFixed(2);
-      _condicionVenta =
-          facturaAAnular.condicionVenta ?? 'Transferencia / Débito';
+      _precargarDesdeFactura(facturaAAnular);
     }
     _montoController.addListener(() => setState(() {}));
     _nombreClienteController.addListener(_onDatosClienteEditados);
@@ -252,10 +299,10 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
     final cuitActual = ArcaFiscalService.normalizarCuit(cuitPerfil);
     if (ArcaFiscalService.tieneFormatoCuit(cuitActual)) {
       if (cuitPerfil != cuitActual) {
-        await FirebaseFirestore.instance
-            .collection('usuarios')
-            .doc(userId)
-            .set({'cuit': cuitActual}, SetOptions(merge: true));
+        await FirebaseFirestore.instance.collection('usuarios').doc(userId).set(
+          {'cuit': cuitActual},
+          SetOptions(merge: true),
+        );
       }
       return cuitActual;
     }
@@ -533,15 +580,28 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
   /// Paso 1: Valida el formulario e inicia la previsualización modal antes de emitir.
   Future<void> _solicitarEmisionFactura() async {
     if (!_formKey.currentState!.validate()) return;
-    final facturaOriginal = widget.comprobanteAAnular;
-    if (_tipoComprobante == 'Nota de Crédito C' && facturaOriginal == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Seleccioná una Factura C del historial para vincular la Nota de Crédito.',
-          ),
-          backgroundColor: Color(0xFFEF4444),
-        ),
+    final facturaOriginal = _facturaOriginal;
+    if (_esNotaCredito && facturaOriginal == null) {
+      _mostrarErrorEmision(
+        'Seleccioná la Factura C que vas a anular en "Comprobante Asociado a Anular".',
+      );
+      return;
+    }
+    if (_esNotaCredito &&
+        facturaOriginal != null &&
+        (facturaOriginal.tipoComprobante != 'Factura C' ||
+            facturaOriginal.numeroComprobanteFiscal == null)) {
+      _mostrarErrorEmision(
+        'El comprobante asociado debe ser una Factura C con número de comprobante válido.',
+      );
+      return;
+    }
+    if (_esNotaCredito &&
+        widget.comprobanteAAnular == null &&
+        !_facturasAnulables.any((item) => item.id == facturaOriginal?.id)) {
+      setState(() => _facturaAsociada = null);
+      _mostrarErrorEmision(
+        'La factura seleccionada ya no está disponible para anular. Elegí otra.',
       );
       return;
     }
@@ -564,8 +624,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       return;
     }
     if (facturaOriginal != null &&
-        monto.toStringAsFixed(2) !=
-            facturaOriginal.monto.toStringAsFixed(2)) {
+        monto.toStringAsFixed(2) != facturaOriginal.monto.toStringAsFixed(2)) {
       _mostrarErrorEmision(
         'El importe de la Nota de Crédito debe coincidir con el total de la factura original.',
       );
@@ -740,7 +799,8 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                         valor: nombreCliente.isNotEmpty
                             ? nombreCliente
                             : 'Consumidor Final',
-                        subvalor: cuitCliente.isNotEmpty &&
+                        subvalor:
+                            cuitCliente.isNotEmpty &&
                                 cuitCliente != 'Consumidor Final'
                             ? '$tipoDocCliente: $cuitCliente'
                             : 'Consumidor Final',
@@ -751,11 +811,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                       _buildResumenFila(
                         icon: Icons.work_outline_rounded,
                         label: 'Concepto / Descripción',
-                        valor: descripcion.isNotEmpty
-                            ? descripcion
-                            : concepto,
-                        subvalor: descripcion.isNotEmpty &&
-                                descripcion != concepto
+                        valor: descripcion.isNotEmpty ? descripcion : concepto,
+                        subvalor:
+                            descripcion.isNotEmpty && descripcion != concepto
                             ? 'Tipo: $concepto'
                             : null,
                       ),
@@ -820,8 +878,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                               value: pctConsumo.clamp(0.0, 1.0),
                               minHeight: 6,
                               backgroundColor: const Color(0xFFE2E8F0),
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(colorConsumo),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                colorConsumo,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -980,7 +1039,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
 
   /// Paso 2: Ejecuta la emisión fiscal propiamente dicha tras la confirmación.
   Future<void> _ejecutarEmisionFiscal(double monto) async {
-    final facturaOriginal = widget.comprobanteAAnular;
+    final facturaOriginal = _facturaOriginal;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _mostrarErrorEmision('Iniciá sesión para emitir comprobantes.');
@@ -1043,11 +1102,12 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
         comprobanteAsociadoId: facturaOriginal?.id,
         comprobanteAsociadoNumero: facturaOriginal == null
             ? null
-            : (facturaOriginal.nroFactura.trim().isNotEmpty
-                  ? facturaOriginal.nroFactura
-                  : '${facturaOriginal.puntoVenta}-'
-                        '${facturaOriginal.numeroComprobante ?? ''}'),
+            : '${facturaOriginal.puntoVentaFiscal}-'
+                  '${facturaOriginal.numeroComprobanteFiscal ?? ''}',
         comprobanteAsociadoTipo: facturaOriginal?.tipoComprobante,
+        comprobanteAsociadoPuntoVenta: facturaOriginal?.puntoVentaFiscal,
+        comprobanteAsociadoNumeroComprobante:
+            facturaOriginal?.numeroComprobanteFiscal,
         fechaEmision: _fechaEmision,
         concepto: _concepto,
         tipoDocumentoCliente: tipoDocumento,
@@ -1314,33 +1374,31 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 ElevatedButton.icon(
-                    onPressed: () async {
-                      try {
-                        await PdfInvoiceService.shareInvoicePdf(facturaData);
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('Error al compartir PDF: $e'),
-                            ),
-                          );
-                        }
+                  onPressed: () async {
+                    try {
+                      await PdfInvoiceService.shareInvoicePdf(facturaData);
+                    } catch (e) {
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text('Error al compartir PDF: $e')),
+                        );
                       }
-                    },
-                    icon: const Icon(Icons.share_rounded, size: 18),
-                    label: const Text(
-                      'Compartir PDF',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF059669),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                    }
+                  },
+                  icon: const Icon(Icons.share_rounded, size: 18),
+                  label: const Text(
+                    'Compartir PDF',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF059669),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () {
@@ -1409,6 +1467,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
 
   void _resetFormulario() {
     setState(() {
+      _facturaAsociada = null;
       _montoController.clear();
       _nroDocController.clear();
       _nombreClienteController.clear();
@@ -1542,9 +1601,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
       backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: Text(
-          widget.comprobanteAAnular == null
-              ? 'Facturación Electrónica'
-              : 'Nota de Crédito C',
+          _esNotaCredito ? 'Nota de Crédito C' : 'Facturación Electrónica',
           style: const TextStyle(
             color: Color(0xFF0F172A),
             fontWeight: FontWeight.bold,
@@ -1616,9 +1673,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        widget.comprobanteAAnular == null
-                            ? 'La factura se guarda únicamente después de recibir la autorización y el CAE del backend fiscal conectado con ARCA.'
-                            : 'La Nota de Crédito se guarda únicamente después de recibir la autorización y el CAE de ARCA.',
+                        _esNotaCredito
+                            ? 'La Nota de Crédito se guarda únicamente después de recibir la autorización y el CAE de ARCA.'
+                            : 'La factura se guarda únicamente después de recibir la autorización y el CAE del backend fiscal conectado con ARCA.',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12.5,
@@ -1629,6 +1686,14 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                   ],
                 ),
               ),
+
+              // ==========================================
+              // SECCIÓN NC: COMPROBANTE ASOCIADO A ANULAR
+              // ==========================================
+              if (_esNotaCredito) ...[
+                _buildSeccionComprobanteAsociado(),
+                const SizedBox(height: 24),
+              ],
 
               // ==========================================
               // SECCIÓN A: DATOS DE EMISIÓN DEL COMPROBANTE
@@ -1654,7 +1719,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                           ]
                         : const ['Nota de Crédito C'],
                     onChanged: (val) {
-                      if (val != null) setState(() => _tipoComprobante = val);
+                      if (val != null) _onTipoComprobanteChanged(val);
                     },
                   ),
                   const SizedBox(height: 14),
@@ -2023,7 +2088,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                   // Importe Subtotal / Total ($)
                   TextFormField(
                     controller: _montoController,
-                    readOnly: widget.comprobanteAAnular != null,
+                    readOnly: _facturaOriginal != null,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
@@ -2038,7 +2103,7 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                       fontSize: 18,
                     ),
                     decoration: _inputDecoration(
-                      labelText: widget.comprobanteAAnular == null
+                      labelText: _facturaOriginal == null
                           ? 'Importe Total / Subtotal (\$ ARS) *'
                           : 'Importe total de la anulación (\$ ARS)',
                       prefixIcon: Icons.attach_money_rounded,
@@ -2085,7 +2150,10 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _emitirFactura,
+                  onPressed:
+                      _isLoading || (_esNotaCredito && _facturaOriginal == null)
+                      ? null
+                      : _emitirFactura,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF059669),
                     disabledBackgroundColor: const Color(0xFFCBD5E1),
@@ -2108,9 +2176,9 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
                   label: Text(
                     _isLoading
                         ? 'Conectando con ARCA...'
-                        : widget.comprobanteAAnular == null
-                        ? 'Emitir Factura Electrónica'
-                        : 'Emitir Nota de Crédito C',
+                        : _esNotaCredito
+                        ? 'Emitir Nota de Crédito C'
+                        : 'Emitir Factura Electrónica',
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -2123,6 +2191,234 @@ class _NuevaFacturaScreenState extends State<NuevaFacturaScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  String _nombreReceptor(FacturaModel factura) {
+    final nombre = factura.nombreCliente.trim();
+    if (nombre.isNotEmpty) return nombre;
+    final cuit = factura.cuitCliente.trim();
+    return cuit.isEmpty ? 'Consumidor Final' : cuit;
+  }
+
+  /// Sección obligatoria de la Nota de Crédito C: identifica la Factura C anulada.
+  Widget _buildSeccionComprobanteAsociado() {
+    final facturaFija = widget.comprobanteAAnular;
+    final anulables = _facturasAnulables;
+    final cargando = facturaFija == null && _facturasDocs == null;
+    final sinFacturas = facturaFija == null && !cargando && anulables.isEmpty;
+
+    final Widget contenido;
+    if (facturaFija != null) {
+      contenido = _buildResumenFacturaAsociada(facturaFija);
+    } else if (cargando) {
+      contenido = const Center(
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: CircularProgressIndicator(
+            color: Color(0xFF059669),
+            strokeWidth: 2,
+          ),
+        ),
+      );
+    } else if (sinFacturas) {
+      contenido = _buildAvisoSinFacturasC();
+    } else {
+      contenido = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildSelectorFacturaAsociada(anulables),
+          if (_facturaAsociada != null) ...[
+            const SizedBox(height: 10),
+            _buildResumenFacturaAsociada(_facturaAsociada!),
+            const SizedBox(height: 6),
+            const Text(
+              'Los datos del receptor se precargaron desde la factura. Podés editarlos antes de emitir.',
+              style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSectionHeader(
+          icon: Icons.assignment_return_outlined,
+          title: 'Comprobante Asociado a Anular',
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF7ED),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFF97316), width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Obligatorio: una Nota de Crédito C debe anular una Factura C emitida previamente.',
+                style: TextStyle(
+                  color: Color(0xFF9A3412),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 12),
+              contenido,
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAvisoSinFacturasC() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF93C5FD)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded, color: Color(0xFF1D4ED8), size: 18),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'No hay Facturas C emitidas para anular. Primero emití una Factura C: '
+              'no se puede emitir una Nota de Crédito C sin comprobante asociado, '
+              'por eso la emisión queda bloqueada.',
+              style: TextStyle(
+                color: Color(0xFF1E3A8A),
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectorFacturaAsociada(List<FacturaModel> anulables) {
+    final seleccionadaId = _facturaAsociada?.id;
+    final valorActual = anulables.any((f) => f.id == seleccionadaId)
+        ? seleccionadaId
+        : null;
+    return DropdownButtonFormField<String>(
+      key: ValueKey('factura-asociada-$valorActual'),
+      initialValue: valorActual,
+      isExpanded: true,
+      dropdownColor: const Color(0xFFFFFFFF),
+      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5),
+      iconEnabledColor: const Color(0xFF059669),
+      decoration: _inputDecoration(
+        labelText: 'Factura C a anular *',
+        prefixIcon: Icons.receipt_long_outlined,
+      ),
+      hint: const Text(
+        'Seleccionar factura emitida',
+        overflow: TextOverflow.ellipsis,
+      ),
+      validator: (valor) =>
+          valor == null ? 'Seleccioná la Factura C que vas a anular' : null,
+      selectedItemBuilder: (context) => anulables
+          .map(
+            (f) => Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${f.numeroComprobanteCompleto} · '
+                '${_currencyFormat.format(f.monto)}',
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+          )
+          .toList(),
+      items: anulables
+          .map(
+            (f) => DropdownMenuItem<String>(
+              value: f.id,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'N° ${f.numeroComprobanteCompleto}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                  Text(
+                    '${_dateFormat.format(f.fechaEmision)} · '
+                    '${_nombreReceptor(f)} · '
+                    '${_currencyFormat.format(f.monto)}',
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 11.5,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+      onChanged: _seleccionarFacturaAsociada,
+    );
+  }
+
+  Widget _buildResumenFacturaAsociada(FacturaModel factura) {
+    final cuit = factura.cuitCliente.trim();
+    final tieneCuit = cuit.isNotEmpty && cuit != 'Consumidor Final';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFFFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildResumenFila(
+            icon: Icons.receipt_long_outlined,
+            label: 'Número de comprobante',
+            valor:
+                '${factura.tipoComprobante} ${factura.numeroComprobanteCompleto}',
+          ),
+          const Divider(height: 16, color: Color(0xFFE2E8F0)),
+          _buildResumenFila(
+            icon: Icons.calendar_today_rounded,
+            label: 'Fecha de emisión',
+            valor: _dateFormat.format(factura.fechaEmision),
+          ),
+          const Divider(height: 16, color: Color(0xFFE2E8F0)),
+          _buildResumenFila(
+            icon: Icons.person_outline_rounded,
+            label: 'Receptor',
+            valor: _nombreReceptor(factura),
+            subvalor: tieneCuit ? 'CUIT / DNI: $cuit' : null,
+          ),
+          const Divider(height: 16, color: Color(0xFFE2E8F0)),
+          _buildResumenFila(
+            icon: Icons.attach_money_rounded,
+            label: 'Importe',
+            valor: _currencyFormat.format(factura.monto),
+          ),
+        ],
       ),
     );
   }

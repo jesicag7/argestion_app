@@ -4,14 +4,25 @@ import 'package:http/http.dart' as http;
 
 // La clave nunca se versiona: se inyecta en build con
 // --dart-define=GROQ_API_KEY=... Sin clave, el asistente usa el fallback local.
-const String groqApiKey = String.fromEnvironment('GROQ_API_KEY', defaultValue: '');
-const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
+const String groqApiKey = String.fromEnvironment(
+  'GROQ_API_KEY',
+  defaultValue: '',
+);
+
+/// Resultado de una consulta al asistente. [esLocal] es true cuando el texto
+/// proviene del motor local porque la API no está configurada o no respondió.
+class RespuestaAsistente {
+  const RespuestaAsistente(this.texto, {required this.esLocal});
+
+  final String texto;
+  final bool esLocal;
+}
 
 class GeminiService {
-  static const String endpoint = 'https://api.groq.com/openai/v1/chat/completions';
+  static const String endpoint =
+      'https://api.groq.com/openai/v1/chat/completions';
 
-  static String get activeApiKey =>
-      groqApiKey.isNotEmpty ? groqApiKey : geminiApiKey;
+  static String get activeApiKey => groqApiKey;
 
   static bool get isConfigured => activeApiKey.trim().isNotEmpty;
 
@@ -69,30 +80,28 @@ class GeminiService {
 
   /// Consulta directa con Fallback Local automático garantizado
   static Future<String> enviarConsulta(String prompt) async {
-    final res = await sendMessage(prompt: prompt);
-    if (res != null && res.trim().isNotEmpty) {
-      return res.trim();
-    }
-    return responderFallbackLocal(prompt);
+    final respuesta = await sendMessage(prompt: prompt);
+    return respuesta.texto;
   }
+
+  static RespuestaAsistente _respuestaLocal(String prompt) =>
+      RespuestaAsistente(responderFallbackLocal(prompt), esLocal: true);
 
   /// Envía una petición de generación de contenido a la API de Groq
   /// utilizando el modelo Llama 3.1 (llama-3.1-8b-instant).
-  /// Si ocurre cualquier error HTTP, timeout o red, responde con el Fallback Local.
-  static Future<String?> sendMessage({
+  /// Si no hay clave configurada o falla la red, la API o la respuesta, devuelve
+  /// el Fallback Local con [RespuestaAsistente.esLocal] en true.
+  static Future<RespuestaAsistente> sendMessage({
     required String prompt,
     String model = 'llama-3.1-8b-instant',
     String? systemInstruction,
     List<Map<String, String>>? history,
-    String? customApiKey,
   }) async {
-    final apiKey = (customApiKey != null && customApiKey.isNotEmpty)
-        ? customApiKey
-        : activeApiKey;
+    final apiKey = activeApiKey;
 
     if (apiKey.isEmpty) {
       print('API Key no provista. Activando fallback local.');
-      return responderFallbackLocal(prompt);
+      return _respuestaLocal(prompt);
     }
 
     final url = Uri.parse(endpoint);
@@ -102,26 +111,23 @@ class GeminiService {
       'Authorization': 'Bearer $apiKey',
     };
 
-    final String systemContent = (systemInstruction != null && systemInstruction.isNotEmpty)
+    final String systemContent =
+        (systemInstruction != null && systemInstruction.isNotEmpty)
         ? systemInstruction
         : 'Sos Lionel, un asistente virtual experto y amigable de la aplicación ARGestión para monotributistas de Argentina. Respondé de forma clara, concisa, profesional y en español rioplatense (usando voseo cordial) sobre Monotributo, ARCA/AFIP, Factura C, pago de VEP, topes de facturación, recategorización semestral y vencimientos.';
 
     final bodyMap = <String, dynamic>{
       'model': model.isNotEmpty ? model : 'llama-3.1-8b-instant',
       'messages': [
-        {
-          'role': 'system',
-          'content': systemContent,
-        },
+        {'role': 'system', 'content': systemContent},
         if (history != null)
-          ...history.map((h) => {
-                'role': (h['role'] == 'user') ? 'user' : 'assistant',
-                'content': h['text'] ?? '',
-              }),
-        {
-          'role': 'user',
-          'content': prompt,
-        },
+          ...history.map(
+            (h) => {
+              'role': (h['role'] == 'user') ? 'user' : 'assistant',
+              'content': h['text'] ?? '',
+            },
+          ),
+        {'role': 'user', 'content': prompt},
       ],
       'temperature': 0.5,
       'max_tokens': 500,
@@ -129,28 +135,25 @@ class GeminiService {
 
     try {
       final response = await http
-          .post(
-            url,
-            headers: headers,
-            body: jsonEncode(bodyMap),
-          )
+          .post(url, headers: headers, body: jsonEncode(bodyMap))
           .timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        final dynamic data = jsonDecode(response.body);
-        final String? content =
-            data['choices'][0]['message']['content'] as String?;
-        if (content != null && content.trim().isNotEmpty) {
-          return content.trim();
-        }
-        return responderFallbackLocal(prompt);
-      } else {
-        print('Error Groq HTTP (${response.statusCode}): ${response.body}. Activando fallback local.');
-        return responderFallbackLocal(prompt);
+      if (response.statusCode != 200) {
+        print(
+          'Error Groq HTTP (${response.statusCode}). Activando fallback local.',
+        );
+        return _respuestaLocal(prompt);
       }
+      final dynamic data = jsonDecode(response.body);
+      final String? content =
+          data['choices'][0]['message']['content'] as String?;
+      if (content != null && content.trim().isNotEmpty) {
+        return RespuestaAsistente(content.trim(), esLocal: false);
+      }
+      return _respuestaLocal(prompt);
     } catch (e) {
       print('Excepción en consulta a Groq: $e. Activando fallback local.');
-      return responderFallbackLocal(prompt);
+      return _respuestaLocal(prompt);
     }
   }
 }
