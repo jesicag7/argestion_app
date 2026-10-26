@@ -2,10 +2,9 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-const String groqApiKey = String.fromEnvironment(
-  'GROQ_API_KEY',
-  defaultValue: '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',
-);
+// La clave nunca se versiona: se inyecta en build con
+// --dart-define=GROQ_API_KEY=... Sin clave, el asistente usa el fallback local.
+const String groqApiKey = String.fromEnvironment('GROQ_API_KEY', defaultValue: '');
 const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
 
 class GeminiService {

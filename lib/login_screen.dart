@@ -4,6 +4,7 @@ import 'main_navigation.dart';
 import 'registro_screen.dart';
 import 'services/biometric_service.dart';
 import 'services/auth_verification_service.dart';
+import 'services/user_profile_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -168,13 +169,13 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const MainNavigation()),
-          (route) => false,
-        );
-      }
+      await UserProfileService().asegurarPerfilUsuarioActual();
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const MainNavigation()),
+        (route) => false,
+      );
     } on FirebaseAuthException catch (e) {
       String mensajeError =
           'Ocurrió un error al iniciar sesión. Intentá de nuevo.';
@@ -242,6 +243,7 @@ class _LoginScreenState extends State<LoginScreen> {
           }
         }
 
+        await UserProfileService().asegurarPerfilUsuarioActual();
         if (!mounted) return;
 
         Navigator.pushAndRemoveUntil(
