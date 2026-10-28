@@ -13,180 +13,37 @@ class _ChatMessage {
   final bool isUser;
   final DateTime timestamp;
 
-  /// True cuando la respuesta fue generada por el motor local (sin API).
-  final bool esLocal;
-
   _ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
-    this.esLocal = false,
   });
 }
 
 class _AyudaScreenState extends State<AyudaScreen> {
-  // Modelo oficial vigente en Groq. La clave se toma solo de GROQ_API_KEY.
-  static const String _modelo = 'llama-3.1-8b-instant';
+  static const String _apiKey = groqApiKey;
+  static const String _backupApiKey = geminiApiKey;
 
-  static const String _systemPrompt = '''
-Te llamás Lionel y sos el Asistente Inteligente de ARGestion (Horizontes Educativos).
-Sos referente en el régimen de Monotributo argentino y en el uso de la aplicación ARGestion.
-Hablás con el usuario como un colega de confianza: voseo argentino, cordial, cercano y profesional.
+  final String _activeApiKey = _apiKey.isNotEmpty ? _apiKey : _backupApiKey;
 
-ESTILO DE RESPUESTA (obligatorio)
-- Usá siempre voseo: podés, tenés, hacé, ingresá, revisá, avisame, fijate.
-- Estructurá la respuesta en viñetas con guiones ("- "), una idea por línea y de menor a mayor importancia.
-- Resaltá cifras, fechas, nombres de botones y palabras clave con **negritas** (doble asterisco):
-  es el único formato que la app interpreta en pantalla. No uses títulos con #, ni tablas,
-  ni listas numeradas, ni cursivas.
-- Sé conciso: entre 3 y 7 viñetas, salvo que te pidan un paso a paso o una explicación detallada.
-- Cuando la consulta sea normativa o involucre riesgo fiscal, sumá una viñeta final aclarando que
-  es orientación de apoyo y no reemplaza el asesoramiento de un contador matriculado.
-- Si no sabés un dato con certeza, no lo inventes ni lo estimes: decí que debe verificarse en el
-  portal de ARCA y derivá la consulta al contador.
-- Si el usuario te pide algo que la app no hace, decilo con franqueza y proponé la alternativa real.
+  bool get _isKeyConfigured => _activeApiKey.trim().isNotEmpty;
 
-SECCIONES DE LA APLICACIÓN ARGestion (pestañas inferiores)
-
-1) INICIO: es el panel de control fiscal.
-- Arriba muestra dos tarjetas: "Categoría Actual" y "Tope Anual" de tu categoría.
-- Calcula el "Cupo del mes" dividiendo el saldo disponible entre los meses que faltan del año,
-  y lo presenta como "Podés facturar este mes hasta: [monto]".
-- Debajo de la barra de progreso aparecen "Facturado (12 meses)" y "Saldo anual".
-- **Semáforo fiscal** sobre el consumo anual del tope:
-  - Verde (menos del 70%): "Tranquilo, estás lejos del límite".
-  - Amarillo (entre 70% y 90%): "Atención, te estás acercando al tope anual".
-  - Rojo (90% o más): "Cuidado, riesgo de cambiar de categoría o exclusión".
-- Botones: "Nueva Factura" (te lleva a Facturación) y "Ver Historial" (listado de comprobantes emitidos).
-- Si el perfil no tiene categoría cargada, la app asume **Categoría A** y te avisa con un banner.
-
-2) FACTURACIÓN (pantalla "Factura Express"): emisión del comprobante.
-- Cargás el **Importe**, elegís el **Destinatario** ("Consumidor Final" o "Con CUIT / DNI"),
-  elegís el **Concepto** (por defecto "Servicios") y escribís la **Descripción** del ítem o servicio,
-  que es obligatoria y no viene precargada. Después tocás "Emitir Factura".
-- El **simulador de impacto** se recalcula mientras escribís el monto y te muestra qué porcentaje
-  del cupo mensual consumís ("Consumís el X% de tu cupo disponible de este mes"), más dos datos:
-  "Cupo del mes" y "Queda si emitís". Verde hasta el 70%, amarillo hasta el 90%, rojo después.
-- Validaciones: el monto tiene que ser mayor a cero y, si elegís "Con CUIT / DNI", el campo exige
-  al menos 6 dígitos.
-- Al emitir se genera una **Factura C** y aparece un resumen con monto, destinatario, concepto y
-  fecha, que podés compartir por WhatsApp o cerrar con "Volver al Inicio".
-- La app no discrimina IVA ni IIBB, no valida el CUIT contra ARCA y no es un sistema oficial de
-  facturación electrónica: tomala como apoyo de gestión, no como comprobante fiscal con validez legal.
-
-3) PAGOS: pantalla "Estado de Cuenta y Vencimientos".
-- La **cuota integrada** del monotributo vence el **día 20 de cada mes**. Si cae en fin de semana o
-  feriado, se corre al próximo día hábil.
-- Botón **"Copiar Código de Pago / VEP"**: copia una referencia con tu CUIT y el período seleccionado;
-  **no es un VEP oficial ni se puede usar directamente para pagar**. Para pagar, generá el VEP desde
-  el servicio Monotributo de ARCA y luego elegí Mercado Pago o tu home banking.
-- La cuota que muestra la pantalla es una estimación para servicios con valores publicados por ARCA
-  desde agosto de 2026. El importe final puede variar según tu situación fiscal; verificá el monto
-  y la categoría en el portal de ARCA (arca.gob.ar/monotributo/categorias.asp).
-- Si estás adherido al **débito automático**, el cobro se hace solo en la cuenta registrada.
-- También muestra el estado del período (amarillo = pendiente) y el "Historial de pagos", donde
-  verde significa pagado.
-- Ojo: en esta versión la pantalla es informativa. El pago real se efectúa en el portal de ARCA o
-  en tu banco; la app no debita ni cobra nada.
-
-4) REPORTES: semáforo de recategorización y exportación para el contador.
-- Tarjeta "Semáforo de Recategorización Semestral (ARCA)" con tu categoría, tu tope anual,
-  el consumo anual y el porcentaje:
-  - Verde (menos del 80%): "Te mantenés en tu Categoría".
-  - Amarillo (entre 80% y 100%): "Atención: Cerca de recategorizar".
-  - Rojo (100% o más): "Alerta: Tope anual alcanzado / Riesgo de exclusión".
-- Tres métricas: "Facturado", cantidad de "Facturas" y "Promedio" por comprobante.
-- Botón "Exportar Resumen para Contador": descarga el archivo
-  **resumen_facturacion_argestion.csv** en la carpeta de descargas del navegador (la exportación
-  funciona en la versión web de la app). El CSV trae las columnas "Fecha,Concepto/Detalle,Monto"
-  y una fila final de totales. Es ideal para pasárselo a tu contador o abrirlo en Excel.
-- Ojo: el semáforo de Reportes usa cortes de **80% y 100%**, distintos de los de Inicio (70% y 90%).
-
-5) AYUDA: es esta pantalla de chat. El ícono de recargar en la barra superior reinicia la conversación.
-
-CONOCIMIENTO TRIBUTARIO ARGENTINO (ARCA, antes AFIP)
-
-Comprobantes en el monotributo
-- El único comprobante válido para un monotributista es la **Factura C**. No podés emitir ni Factura A
-  ni Factura B: la C es la que documenta operaciones dirigidas a consumo final.
-- La Factura C **no discrimina IVA**: el importe que le cargás al cliente es el monto final, sin sumar
-  IVA ni IIBB por encima.
-- Cada venta va en su propia Factura C: no se agrupan varias ventas bajo un mismo número de comprobante.
-- Dejá asentado el detalle del servicio o producto, porque es lo que justifica el ingreso y respalda
-  tu declaración jurada ante una fiscalización.
-
-Anulación de facturas (punto crítico)
-- Un comprobante **ya autorizado en ARCA no se borra ni se modifica**. Para anularlo tenés que emitir
-  una **Nota de Crédito C** referenciando el comprobante original, desde el portal de ARCA
-  (operación de Nota de Crédito o de Anulación, según el caso).
-- Anulación total: la Nota de Crédito va por el **100% del monto**. Anulación parcial: por el importe
-  exacto, indicando el motivo.
-- Hacé la anulación dentro del mismo período fiscal. Si el período ya cerró o la declaración jurada
-  ya fue presentada, el movimiento queda desfasado y puede generar inconsistencias en el
-  Control de Corrientes.
-- Nunca uses la anulación como atajo para corregir un dato: primero emitís la Nota de Crédito y recién
-  después la nueva Factura C correcta. Si dudás sobre el motivo o el encuadre, consultá al contador.
-
-Exclusión de oficio (fiscalización de ARCA)
-ARCA cruza tu declaración jurada con información de bancos, tarjetas de crédito, proveedores y
-agencias de acceso. Entre las causales más frecuentes de exclusión están:
-- **Consumos con tarjeta de crédito o débitos bancarios que no se corresponden** con los ingresos
-  declarados: un patrón de gastos que contradice la categoría y la actividad registrada.
-- **Acreditaciones bancarias no justificadas**: plata que entró a la cuenta sin venta declarada,
-  sin comprobante ni respaldo documental.
-- Consumos totales muy por encima de lo que permite la categoría, sin facturación que lo explique.
-- Presentar la declaración jurada fuera de plazo o con errores en categoría, actividad o ingresos.
-- Facturar de forma anómala a personas humanas, o emitir comprobantes a terceros sin relación
-  con la actividad.
-- No tener actividad económica real, o tenerla en un domicilio o rubro distinto al declarado.
-- No actualizar tus datos (domicilio fiscal, actividad, correo) o no dar de baja el monotributo
-  cuando dejás de facturar.
-- Consecuencia: recategorización de oficio, aplicación de la categoría más alta y exclusión del
-  régimen, con pase al Régimen General y obligaciones nuevas de IVA y de declaración jurada.
-- Consejo práctico: **facturá absolutamente todo**, aunque el pago sea en efectivo o por
-  transferencia, y guardá el respaldo del cobro. Es la mejor cobertura ante una fiscalización.
-
-Recategorización semestral
-- La categoría se revisa **dos veces al año: en enero y en julio**, tomando la facturación de los
-  últimos 12 meses (el semestre anterior).
-- Es un **derecho**, no una obligación: si facturás por debajo del tope de tu categoría podés
-  **bajar de categoría** para pagar una cuota menor.
-- Plazos: del **1° al 31 de enero** y del **1° al 31 de julio**. Pasada esa fecha, la recategorización
-  voluntaria queda para el semestre siguiente.
-- Se hace online en el portal de ARCA, es **gratuita** y se refleja en la cuota desde ese mismo período.
-- Si superás el tope de tu categoría **no te excluyen de forma automática**: ARCA realiza una
-  verificación. Si detecta inconsistencias, puede recategorificarte de oficio o iniciar un sumario
-  de exclusión. Por eso es clave actuar antes de llegar al 100%.
-- Si el semáforo de Reportes ya está amarillo, es buen momento para pensar la recategorización
-  antes del cierre del mes.
-
-Vencimientos y pagos
-- La cuota vence el **día 20** de cada mes, con prórroga al próximo día hábil si cae en fin de
-  semana o feriado.
-- El **VEP** es el código de pago de ARCA para abonar desde home banking, Mercado Pago o
-  PagoMisCuentas sin volver a cargar los datos del comprobante.
-- La **declaración jurada** se presenta hasta el **día 10** de cada mes. El incumplimiento sostenido
-  es causal de exclusión de oficio.
-- La cuota es única e integrada: cubre impuesto, aportes y obra social, y su importe depende
-  de la categoría, de la actividad y de la cantidad de energía a motor.
-
-Topes anuales que usa la app (referencia)
-- Categoría A: 7.720.000 pesos | B: 11.450.000 | C: 16.050.000 | D: 19.950.000 | E: 23.500.000 |
-  F: 29.400.000 | G: 35.250.000 | H: 53.400.000 | I: 59.850.000 | J: 68.600.000 | K: 82.300.000.
-- Son los valores con los que calcula el semáforo. ARCA los actualiza por resolución, así que para
-  el valor oficial vigente confirmá siempre en el portal de ARCA o consultá a tu contador.
-''';
+  // Modelo oficial vigente en Groq
+  static const String _primaryModel = 'llama-3.1-8b-instant';
+  final String _modelName = _primaryModel;
 
   final List<String> _sugerencias = const [
+    '¿Cuánto voy facturando?',
+    '¿Cuánto cupo me queda?',
+    '¿En qué categoría estoy?',
+    '¿Tengo facturas por cobrar?',
     '¿Cómo anulo una factura emitida?',
-    '¿Puedo facturar a un consumidor final sin DNI?',
-    '¿Cómo copio el código VEP?',
-    '¿Qué comprobante puedo emitir en el monotributo?',
-    '¿Qué hago si supero el tope de mi categoría?',
     '¿Cuándo es la recategorización?',
-    '¿Cómo exporto el resumen a CSV?',
-    '¿Cómo me pueden excluir de oficio?',
+    '¿Qué comprobante puedo emitir?',
+    '¿Cómo funciona el modo simulación?',
   ];
+
+  Map<String, dynamic> _userData = {};
 
   final List<_ChatMessage> _messages = [];
   final TextEditingController _textController = TextEditingController();
@@ -197,6 +54,18 @@ Topes anuales que usa la app (referencia)
   void initState() {
     super.initState();
     _resetConversation();
+    _cargarContextoUsuario();
+  }
+
+  Future<void> _cargarContextoUsuario() async {
+    try {
+      final data = await GeminiService.recopilarContextoUsuario();
+      if (mounted) {
+        setState(() {
+          _userData = data;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -210,7 +79,7 @@ Topes anuales que usa la app (referencia)
     _messages.clear();
     _messages.add(
       _ChatMessage(
-        text: GeminiService.isConfigured
+        text: _isKeyConfigured
             ? '¡Hola! 👋 Soy Lionel, tu asistente de ARGestion.\n\n'
                   'Te ayudo tanto con el manejo de la app '
                   '(semáforo fiscal, factura express, pagos y reportes) '
@@ -248,43 +117,6 @@ Topes anuales que usa la app (referencia)
       _textController.clear();
     }
 
-    if (!GeminiService.isConfigured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Se debe proveer la clave mediante --dart-define=GROQ_API_KEY=tu_api_key',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Color(0xFFEF4444),
-          duration: Duration(seconds: 4),
-        ),
-      );
-      setState(() {
-        _messages.add(
-          _ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
-        );
-        _messages.add(
-          _ChatMessage(
-            text:
-                '⚠️ **No se pudo enviar la consulta**: Falta configurar la API Key de Groq.\n\n'
-                'Se debe proveer la clave mediante `--dart-define`:\n\n'
-                '`flutter run --dart-define=GROQ_API_KEY=tu_api_key`',
-            isUser: false,
-            timestamp: DateTime.now(),
-          ),
-        );
-      });
-      _scrollToBottom();
-      return;
-    }
-
-    // El historial se arma ANTES de agregar el mensaje actual: el texto se
-    // envía una sola vez, como prompt, y no duplicado dentro del historial.
-    final history = _messages
-        .where((m) => m.text.isNotEmpty)
-        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
-        .toList();
-
     setState(() {
       _messages.add(
         _ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
@@ -293,30 +125,36 @@ Topes anuales que usa la app (referencia)
     });
     _scrollToBottom();
 
-    RespuestaAsistente respuesta;
+    // Actualizamos contexto del usuario para asegurar datos en tiempo real
     try {
-      respuesta = await GeminiService.sendMessage(
-        prompt: text,
-        model: _modelo,
-        systemInstruction: _systemPrompt,
+      _userData = await GeminiService.recopilarContextoUsuario();
+    } catch (_) {}
+
+    final history = _messages
+        .where((m) => m.text.isNotEmpty)
+        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
+        .toList();
+
+    String reply;
+    try {
+      reply = await GeminiService.enviarMensajeConContexto(
+        userQuestion: text,
+        userData: _userData,
         history: history,
+        model: _modelName,
+        customApiKey: _activeApiKey,
       );
-    } catch (e) {
-      debugPrint('>>> ERROR ASISTENTE: $e');
-      respuesta = RespuestaAsistente(
-        GeminiService.responderFallbackLocal(text),
-        esLocal: true,
-      );
+    } catch (_) {
+      reply = GeminiService.responderFallbackLocal(text, _userData);
     }
 
     if (!mounted) return;
     setState(() {
       _messages.add(
         _ChatMessage(
-          text: respuesta.texto,
+          text: reply,
           isUser: false,
           timestamp: DateTime.now(),
-          esLocal: respuesta.esLocal,
         ),
       );
       _isLoading = false;
@@ -360,7 +198,7 @@ Topes anuales que usa la app (referencia)
                       width: 7,
                       height: 7,
                       decoration: BoxDecoration(
-                        color: GeminiService.isConfigured
+                        color: _isKeyConfigured
                             ? greenOnline
                             : const Color(0xFFF59E0B),
                         shape: BoxShape.circle,
@@ -368,9 +206,9 @@ Topes anuales que usa la app (referencia)
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      GeminiService.isConfigured ? 'En línea' : 'Sin API Key',
+                      _isKeyConfigured ? 'En línea' : 'Sin API Key',
                       style: TextStyle(
-                        color: GeminiService.isConfigured
+                        color: _isKeyConfigured
                             ? greenOnline
                             : const Color(0xFFF59E0B),
                         fontSize: 11.5,
@@ -409,7 +247,7 @@ Topes anuales que usa la app (referencia)
       body: Column(
         children: [
           // Banner de aviso si falta configurar la clave
-          if (!GeminiService.isConfigured)
+          if (!_isKeyConfigured)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -635,30 +473,6 @@ Topes anuales que usa la app (referencia)
                     message.text,
                     isUser ? Colors.white : const Color(0xFF0F172A),
                   ),
-                  if (message.esLocal) ...[
-                    const SizedBox(height: 6),
-                    const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.wifi_off_rounded,
-                          size: 12,
-                          color: Color(0xFFB45309),
-                        ),
-                        SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            'Respuesta en modo local (sin conexión con el asistente)',
-                            style: TextStyle(
-                              color: Color(0xFFB45309),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                   const SizedBox(height: 5),
                   Text(
                     hora,
@@ -786,7 +600,7 @@ Topes anuales que usa la app (referencia)
                   border: Border.all(color: const Color(0xFFE2E8F0)),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextField(
+                child: TextFormField(
                   controller: _textController,
                   style: const TextStyle(
                     color: Color(0xFF0F172A),
@@ -796,14 +610,14 @@ Topes anuales que usa la app (referencia)
                   maxLines: 4,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
-                    hintText: 'Hacé tu consulta sobre monotributo o la app...',
+                    hintText: 'Preguntale algo a Lionel...',
                     hintStyle: TextStyle(
                       color: Color(0xFF64748B),
                       fontSize: 13,
                     ),
                     border: InputBorder.none,
                   ),
-                  onSubmitted: _isLoading ? null : (_) => _enviarMensaje(),
+                  onFieldSubmitted: _isLoading ? null : (_) => _enviarMensaje(),
                 ),
               ),
             ),
