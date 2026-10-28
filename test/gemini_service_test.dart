@@ -163,7 +163,7 @@ void main() {
   });
 
   group('GeminiService.enviarMensajeConContexto y API de Groq', () {
-    test('sends Authorization Bearer with configured Groq API Key', () async {
+    test('sends Authorization Bearer with the API Key provided', () async {
       String? capturedAuthHeader;
       final mockClient = MockHttpClient((request) async {
         capturedAuthHeader = request.headers['Authorization'];
@@ -187,12 +187,71 @@ void main() {
         userQuestion: 'Hola',
         userData: {'nombre': 'Test'},
         client: mockClient,
+        customApiKey: 'test_api_key',
       );
 
-      expect(
-        capturedAuthHeader,
-        'Bearer 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',
+      expect(capturedAuthHeader, 'Bearer test_api_key');
+    });
+
+    test('sends the question to the model and does not answer with keywords', () async {
+      String? capturedModel;
+      String? capturedLastUserMessage;
+      final mockClient = MockHttpClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        capturedModel = body['model'] as String?;
+        final messages = body['messages'] as List<dynamic>;
+        capturedLastUserMessage = messages.last['content'] as String?;
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {'message': {'role': 'assistant', 'content': 'Una Factura C es un comprobante fiscal.'}}
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final reply = await GeminiService.enviarMensajeConContexto(
+        userQuestion: 'que es una factura c',
+        userData: {'nombre': 'Martín', 'totalFacturado': '0'},
+        client: mockClient,
+        customApiKey: 'test_api_key',
       );
+
+      expect(reply, 'Una Factura C es un comprobante fiscal.');
+      expect(reply, isNot(contains('total facturado')));
+      expect(capturedModel, GeminiService.defaultModel);
+      expect(capturedLastUserMessage, 'que es una factura c');
+    });
+
+    test('returns connection error message when model content is empty', () async {
+      final mockClient = MockHttpClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {'message': {'role': 'assistant', 'content': ''}}
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final reply = await GeminiService.enviarMensajeConContexto(
+        userQuestion: '¿Cuánto cupo me queda?',
+        userData: {'categoria': 'B', 'cupoDisponible': '10.200.000'},
+        client: mockClient,
+        customApiKey: 'test_api_key',
+      );
+
+      expect(reply, GeminiService.mensajeErrorConexion);
+    });
+
+    test('ships with a configured Groq key and the current default model', () {
+      expect(GeminiService.isConfigured, isTrue);
+      expect(GeminiService.activeApiKey, startsWith('gsk_'));
+      expect(GeminiService.defaultModel, 'openai/gpt-oss-20b');
     });
 
     test('returns AI response when HTTP 200 and sends prompt with user context', () async {
@@ -237,65 +296,51 @@ void main() {
       expect(capturedSystemPrompt, contains('- Categoría actual: B'));
     });
 
-    test('activates intelligent local fallback on connection failure (SocketException)', () async {
+    test('returns connection error message on network failure (SocketException)', () async {
       final mockClient = MockHttpClient((request) async {
         throw const SocketException('Failed to connect to host');
       });
 
-      final userData = {
-        'nombre': 'Martín',
-        'categoria': 'B',
-        'totalFacturado': '1.250.000',
-        'cupoDisponible': '10.200.000',
-      };
-
       final reply = await GeminiService.enviarMensajeConContexto(
         userQuestion: '¿Cuánto cupo me queda?',
-        userData: userData,
+        userData: {'categoria': 'B', 'cupoDisponible': '10.200.000'},
         client: mockClient,
+        customApiKey: 'test_api_key',
       );
 
-      expect(reply, contains('10.200.000'));
-      expect(reply, contains('Categoría B'));
-      expect(reply, contains('11.450.000'));
+      expect(reply, GeminiService.mensajeErrorConexion);
+      expect(reply, isNot(contains('10.200.000')));
     });
 
-    test('activates intelligent local fallback on TimeoutException', () async {
+    test('returns connection error message on TimeoutException', () async {
       final mockClient = MockHttpClient((request) async {
         throw TimeoutException('Request timed out');
       });
 
-      final userData = {
-        'nombre': 'Martín',
-        'categoria': 'D',
-      };
-
       final reply = await GeminiService.enviarMensajeConContexto(
         userQuestion: '¿En qué categoría estoy?',
-        userData: userData,
+        userData: {'nombre': 'Martín', 'categoria': 'D'},
         client: mockClient,
+        customApiKey: 'test_api_key',
       );
 
-      expect(reply, contains('Categoría D'));
+      expect(reply, GeminiService.mensajeErrorConexion);
     });
 
-    test('activates intelligent local fallback on HTTP error (e.g. 500/503)', () async {
+    test('returns connection error message on HTTP error (e.g. 404/500/503)', () async {
       final mockClient = MockHttpClient((request) async {
-        return http.Response('Internal Server Error', 500);
+        return http.Response('{"error":{"code":"model_not_found"}}', 404);
       });
-
-      final userData = {
-        'nombre': 'Martín',
-        'totalFacturado': '3.400.000',
-      };
 
       final reply = await GeminiService.enviarMensajeConContexto(
         userQuestion: '¿Cuánto voy facturando?',
-        userData: userData,
+        userData: {'nombre': 'Martín', 'totalFacturado': '3.400.000'},
         client: mockClient,
+        customApiKey: 'test_api_key',
       );
 
-      expect(reply, contains('3.400.000'));
+      expect(reply, GeminiService.mensajeErrorConexion);
+      expect(reply, isNot(contains('3.400.000')));
     });
 
     test('recopilarContextoUsuario safely returns defaults when Firebase is not initialized', () async {

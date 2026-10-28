@@ -7,20 +7,26 @@ import 'package:intl/intl.dart';
 
 import '../models/monotributo_category.dart';
 
+// ADVERTENCIA: clave de entrega temporal, incluida en el código a pedido del equipo para que
+// la app funcione con `flutter run` sin parámetros. Es una credencial expuesta en el repositorio
+// (y en el historial de git): debe revocarse y reemplazarse por un backend proxy en producción.
+// Ver README.md, sección "Arquitectura de IA en producción". Sobrescribible con --dart-define=GROQ_API_KEY=...
 const String groqApiKey = String.fromEnvironment(
   'GROQ_API_KEY',
   defaultValue: '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',
 );
-const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
 
 class GeminiService {
   static const String endpoint = 'https://api.groq.com/openai/v1/chat/completions';
 
+  /// Modelo vigente en Groq. Centralizado para no repetir el literal en la UI y el servicio.
+  /// (llama-3.1-8b-instant fue dado de baja y devuelve 404 model_not_found.)
+  static const String defaultModel = 'openai/gpt-oss-20b';
+
   static const String mensajeErrorConexion =
       'No pude conectarme con el servicio de IA en este momento. Verificá tu conexión a internet o consultá los gráficos de facturación en la pantalla.';
 
-  static String get activeApiKey =>
-      groqApiKey.isNotEmpty ? groqApiKey : geminiApiKey;
+  static String get activeApiKey => groqApiKey;
 
   static bool get isConfigured => activeApiKey.trim().isNotEmpty;
 
@@ -388,23 +394,24 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
   static String responderFallbackConContexto(String prompt, [Map<String, dynamic>? userData]) =>
       responderFallbackLocal(prompt, userData);
 
-  /// Consulta directa con Fallback Local automático garantizado
+  /// Consulta directa a la IA. Ante error devuelve [mensajeErrorConexion] (sin keywords).
   static Future<String> enviarConsulta(String prompt, [Map<String, dynamic>? userData]) async {
-    final res = await sendMessage(prompt: prompt, userData: userData);
-    if (res != null && res.trim().isNotEmpty && res != mensajeErrorConexion) {
-      return res.trim();
-    }
-    return responderFallbackLocal(prompt, userData);
+    final res = await sendMessage(
+      prompt: prompt,
+      userData: userData,
+      usarMensajeErrorEnFallo: true,
+    );
+    return (res == null || res.trim().isEmpty) ? mensajeErrorConexion : res.trim();
   }
 
-  /// Envía la consulta a Lionel inyectando en el System Prompt el contexto en tiempo real del usuario.
-  /// Si la llamada HTTP a Groq devuelve algún error (código distinto de 200, timeout o falta de red),
-  /// activa una respuesta local inteligente de contingencia usando el `userData` inyectado.
+  /// Envía la pregunta libre de Lionel directamente al modelo, con el contexto real del usuario
+  /// inyectado en el System Prompt. Si la IA no responde (sin clave, HTTP distinto de 200,
+  /// timeout, red o respuesta vacía) devuelve [mensajeErrorConexion]; no usa respuestas predefinidas.
   static Future<String> enviarMensajeConContexto({
     required String userQuestion,
     required Map<String, dynamic> userData,
     List<Map<String, String>>? history,
-    String model = 'llama-3.1-8b-instant',
+    String model = defaultModel,
     String? customApiKey,
     http.Client? client,
   }) async {
@@ -417,15 +424,13 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
         history: history,
         customApiKey: customApiKey,
         client: client,
-        usarMensajeErrorEnFallo: false,
+        usarMensajeErrorEnFallo: true,
         userData: userData,
       );
-      if (res != null && res.trim().isNotEmpty && res != mensajeErrorConexion) {
-        return res.trim();
-      }
-      return responderFallbackLocal(userQuestion, userData);
+      if (res == null || res.trim().isEmpty) return mensajeErrorConexion;
+      return res.trim();
     } catch (_) {
-      return responderFallbackLocal(userQuestion, userData);
+      return mensajeErrorConexion;
     }
   }
 
@@ -434,7 +439,7 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
     required String userQuestion,
     required Map<String, dynamic> userData,
     List<Map<String, String>>? history,
-    String model = 'llama-3.1-8b-instant',
+    String model = defaultModel,
     String? customApiKey,
     http.Client? client,
   }) => enviarMensajeConContexto(
@@ -446,12 +451,12 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
     client: client,
   );
 
-  /// Envía una petición de generación de contenido a la API de Groq
-  /// utilizando el modelo Llama 3.1 (llama-3.1-8b-instant).
-  /// Si ocurre cualquier error HTTP, timeout o red, responde con el Fallback Local inteligente de contingencia.
+  /// Envía una petición de chat a la API de Groq usando [model] (por defecto [defaultModel]).
+  /// Ante error HTTP, timeout, red o respuesta vacía devuelve [mensajeErrorConexion] si
+  /// [usarMensajeErrorEnFallo] es true; en caso contrario, el fallback local (solo para usos no conversacionales).
   static Future<String?> sendMessage({
     required String prompt,
-    String model = 'llama-3.1-8b-instant',
+    String model = defaultModel,
     String? systemInstruction,
     List<Map<String, String>>? history,
     String? customApiKey,
@@ -482,7 +487,7 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
         : 'Sos Lionel, un asistente virtual experto y amigable de la aplicación ARGestión para monotributistas de Argentina. Respondé de forma clara, concisa, profesional y en español rioplatense (usando voseo cordial) sobre Monotributo, ARCA/AFIP, Factura C, pago de VEP, topes de facturación, recategorización semestral y vencimientos.';
 
     final bodyMap = <String, dynamic>{
-      'model': model.isNotEmpty ? model : 'llama-3.1-8b-instant',
+      'model': model.isNotEmpty ? model : defaultModel,
       'messages': [
         {
           'role': 'system',
@@ -499,7 +504,8 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
         },
       ],
       'temperature': 0.5,
-      'max_tokens': 500,
+      // Holgura para modelos de razonamiento (gpt-oss) que consumen tokens antes de responder.
+      'max_tokens': 1024,
     };
 
     try {

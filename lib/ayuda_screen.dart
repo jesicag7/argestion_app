@@ -21,16 +21,13 @@ class _ChatMessage {
 }
 
 class _AyudaScreenState extends State<AyudaScreen> {
-  static const String _apiKey = groqApiKey;
-  static const String _backupApiKey = geminiApiKey;
-
-  final String _activeApiKey = _apiKey.isNotEmpty ? _apiKey : _backupApiKey;
+  // Clave de Groq (solo Groq: no hay respaldo con claves de otros proveedores)
+  final String _activeApiKey = groqApiKey;
 
   bool get _isKeyConfigured => _activeApiKey.trim().isNotEmpty;
 
-  // Modelo oficial vigente en Groq
-  static const String _primaryModel = 'llama-3.1-8b-instant';
-  final String _modelName = _primaryModel;
+  // Modelo vigente en Groq, centralizado en el servicio
+  final String _modelName = GeminiService.defaultModel;
 
   final List<String> _sugerencias = const [
     '¿Cuánto voy facturando?',
@@ -117,6 +114,13 @@ class _AyudaScreenState extends State<AyudaScreen> {
       _textController.clear();
     }
 
+    // Historial previo a este mensaje: la pregunta actual se envía una sola vez
+    // (como "user" final dentro de sendMessage), no duplicada desde el historial.
+    final history = _messages
+        .where((m) => m.text.isNotEmpty)
+        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
+        .toList();
+
     setState(() {
       _messages.add(
         _ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
@@ -130,11 +134,6 @@ class _AyudaScreenState extends State<AyudaScreen> {
       _userData = await GeminiService.recopilarContextoUsuario();
     } catch (_) {}
 
-    final history = _messages
-        .where((m) => m.text.isNotEmpty)
-        .map((m) => {'role': m.isUser ? 'user' : 'model', 'text': m.text})
-        .toList();
-
     String reply;
     try {
       reply = await GeminiService.enviarMensajeConContexto(
@@ -145,7 +144,7 @@ class _AyudaScreenState extends State<AyudaScreen> {
         customApiKey: _activeApiKey,
       );
     } catch (_) {
-      reply = GeminiService.responderFallbackLocal(text, _userData);
+      reply = GeminiService.mensajeErrorConexion;
     }
 
     if (!mounted) return;
@@ -606,8 +605,10 @@ class _AyudaScreenState extends State<AyudaScreen> {
                     color: Color(0xFF0F172A),
                     fontSize: 14,
                   ),
+                  // Campo de una línea: Enter envía en vez de insertar un salto de línea.
                   minLines: 1,
-                  maxLines: 4,
+                  maxLines: 1,
+                  textInputAction: TextInputAction.send,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
                     hintText: 'Preguntale algo a Lionel...',
