@@ -7,14 +7,11 @@ import 'package:intl/intl.dart';
 
 import '../models/monotributo_category.dart';
 
-// ADVERTENCIA: clave de entrega temporal, incluida en el código a pedido del equipo para que
-// la app funcione con `flutter run` sin parámetros. Es una credencial expuesta en el repositorio
-// (y en el historial de git): debe revocarse y reemplazarse por un backend proxy en producción.
-// Ver README.md, sección "Arquitectura de IA en producción". Sobrescribible con --dart-define=GROQ_API_KEY=...
-const String groqApiKey = String.fromEnvironment(
-  'GROQ_API_KEY',
-  defaultValue: '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',
-);
+// La clave de Groq se provee SOLO en tiempo de compilación/ejecución, nunca se versiona:
+//   flutter run --dart-define=GROQ_API_KEY=tu_clave_aqui
+// Si no se provee, el string queda vacío y Lionel muestra un mensaje de configuración.
+// Ver README.md, sección "Arquitectura de IA (Lionel)".
+const String groqApiKey = String.fromEnvironment('GROQ_API_KEY');
 
 class GeminiService {
   static const String endpoint = 'https://api.groq.com/openai/v1/chat/completions';
@@ -25,6 +22,10 @@ class GeminiService {
 
   static const String mensajeErrorConexion =
       'No pude conectarme con el servicio de IA en este momento. Verificá tu conexión a internet o consultá los gráficos de facturación en la pantalla.';
+
+  static const String mensajeClaveNoConfigurada =
+      'El asistente Lionel no está configurado: falta la clave de Groq. Ejecutá la app con '
+      '`flutter run --dart-define=GROQ_API_KEY=tu_clave_aqui` para habilitarlo.';
 
   static String get activeApiKey => groqApiKey;
 
@@ -469,9 +470,9 @@ GUÍA OPERATIVA DE LA APP ARGESTIÓN:
         : activeApiKey;
 
     if (apiKey.isEmpty) {
-      print('API Key no provista.');
+      print('API Key de Groq no provista (usar --dart-define=GROQ_API_KEY=...).');
       return usarMensajeErrorEnFallo
-          ? mensajeErrorConexion
+          ? mensajeClaveNoConfigurada
           : responderFallbackLocal(prompt, userData);
     }
 

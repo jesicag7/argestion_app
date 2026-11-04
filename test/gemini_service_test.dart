@@ -248,9 +248,10 @@ void main() {
       expect(reply, GeminiService.mensajeErrorConexion);
     });
 
-    test('ships with a configured Groq key and the current default model', () {
-      expect(GeminiService.isConfigured, isTrue);
-      expect(GeminiService.activeApiKey, startsWith('gsk_'));
+    test('reads the Groq key only from --dart-define and uses the current default model', () {
+      // La clave no se versiona: isConfigured depende de si se pasó GROQ_API_KEY por consola.
+      expect(GeminiService.isConfigured, groqApiKey.trim().isNotEmpty);
+      expect(GeminiService.activeApiKey, groqApiKey);
       expect(GeminiService.defaultModel, 'openai/gpt-oss-20b');
     });
 

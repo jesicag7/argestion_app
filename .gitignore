@@ -44,6 +44,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Local secrets (never commit real API keys)
+lib/config/secrets.dart
+
 # Backend dependencies and secrets
 backend/node_modules/
 backend/.env

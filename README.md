@@ -16,19 +16,27 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
-## Arquitectura de IA (Lionel)
+## Cómo ejecutar la app (Lionel requiere clave de Groq)
 
-### Estado actual (entrega)
+La clave de Groq **no está en el repositorio**. Para habilitar el asistente, pasala por consola:
 
-Para que la app funcione con `flutter run` sin parámetros, `lib/services/gemini_service.dart`
-incluye una clave de Groq de entrega temporal como valor por defecto. Consideraciones:
+```bash
+flutter run --dart-define=GROQ_API_KEY=tu_clave_aqui
+```
 
-- La clave está expuesta en el repositorio público y en el historial de git (commits
-  `e14b440a5d` y `d58fdb6f55`, entre otros). Cualquiera puede usarla y consumir la cuota.
-- Puede sobrescribirse en build con `--dart-define=GROQ_API_KEY=...`.
+- Obtené una clave gratuita en la consola de Groq (https://console.groq.com).
+- Si no se pasa `GROQ_API_KEY`, la app funciona normalmente, pero Lionel muestra un aviso
+  indicando que falta configurar la clave.
 - El modelo por defecto es `openai/gpt-oss-20b` (`GeminiService.defaultModel`).
-- No hay respaldo con claves de otros proveedores: si la clave de Groq falla, Lionel muestra un
-  mensaje de error de conexión.
+- Para tests: `flutter test test/gemini_service_test.dart` (el test de configuración se ajusta
+  según si se pasó la clave).
+
+### Estado de seguridad
+
+Una clave de Groq expuesta en commits anteriores del historial de git debe considerarse
+comprometida: revocarla en la consola de Groq y generar una nueva. No la incluyas en el código
+ni en archivos versionados. Para una plantilla local, ver `lib/config/secrets.example.dart`
+(`lib/config/secrets.dart` está ignorado por git).
 
 ### Arquitectura definitiva de producción: backend proxy
 
